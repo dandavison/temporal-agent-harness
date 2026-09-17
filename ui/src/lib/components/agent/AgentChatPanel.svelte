@@ -1301,48 +1301,52 @@
               <div class="pending-approval-copy">
                 <strong>{approval.toolName ?? approval.body ?? "Tool approval"}</strong>
                 <span>Turn {approval.turnNumber} · {time(approval.timestamp)}</span>
-                <StatusChip label="Awaiting approval" kind="approval" compact active />
               </div>
-              <div class="approval-actions compact">
-                <Chip
-                  tone="success"
-                  fill="quiet"
-                  toned
-                  disabled={!onApproveTool || isApprovalResolving(approval)}
-                  onclick={(event) => void resolveApproval(event, approval, true)}
-                  onkeydown={(event: KeyboardEvent) => event.stopPropagation()}
-                >
-                  {#snippet lead()}
-                    <CheckCircle2 size={13} />
-                  {/snippet}
-                  Approve
-                </Chip>
-                <Chip
-                  tone="queue"
-                  fill="quiet"
-                  toned
-                  disabled={!onApproveTool || isApprovalResolving(approval)}
-                  onclick={(event) => void resolveApproval(event, approval, true, true)}
-                  onkeydown={(event: KeyboardEvent) => event.stopPropagation()}
-                >
-                  {#snippet lead()}
-                    <ShieldCheck size={13} />
-                  {/snippet}
-                  Approve and remember
-                </Chip>
-                <Chip
-                  tone="error"
-                  fill="quiet"
-                  toned
-                  disabled={!onApproveTool || isApprovalResolving(approval)}
-                  onclick={(event) => void resolveApproval(event, approval, false)}
-                  onkeydown={(event: KeyboardEvent) => event.stopPropagation()}
-                >
-                  {#snippet lead()}
-                    <XCircle size={13} />
-                  {/snippet}
-                  Reject
-                </Chip>
+              <div class="approval-actions">
+                <div class="approval-buttons">
+                  <Chip
+                    class="approval-button"
+                    tone="success"
+                    fill="quiet"
+                    toned
+                    disabled={!onApproveTool || isApprovalResolving(approval)}
+                    onclick={(event) => void resolveApproval(event, approval, true)}
+                    onkeydown={(event: KeyboardEvent) => event.stopPropagation()}
+                  >
+                    {#snippet lead()}
+                      <CheckCircle2 size={13} />
+                    {/snippet}
+                    Approve
+                  </Chip>
+                  <Chip
+                    class="approval-button"
+                    tone="queue"
+                    fill="quiet"
+                    toned
+                    disabled={!onApproveTool || isApprovalResolving(approval)}
+                    onclick={(event) => void resolveApproval(event, approval, true, true)}
+                    onkeydown={(event: KeyboardEvent) => event.stopPropagation()}
+                  >
+                    {#snippet lead()}
+                      <ShieldCheck size={13} />
+                    {/snippet}
+                    Approve &amp; remember
+                  </Chip>
+                  <Chip
+                    class="approval-button approval-reject"
+                    tone="error"
+                    fill="quiet"
+                    toned
+                    disabled={!onApproveTool || isApprovalResolving(approval)}
+                    onclick={(event) => void resolveApproval(event, approval, false)}
+                    onkeydown={(event: KeyboardEvent) => event.stopPropagation()}
+                  >
+                    {#snippet lead()}
+                      <XCircle size={13} />
+                    {/snippet}
+                    Reject
+                  </Chip>
+                </div>
                 {#if approvalError(approval)}
                   <span class="approval-error">{approvalError(approval)}</span>
                 {/if}
@@ -1911,17 +1915,67 @@
   }
 
   .approval-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
-    margin-left: 30px;
-    padding-top: 2px;
+    min-width: 0;
+    display: grid;
+    gap: var(--gap-xs);
   }
 
-  .approval-actions.compact {
-    margin-left: 0;
-    padding-top: 0;
+  .approval-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gap-sm);
+    align-items: center;
+  }
+
+  .pending-approval-card .approval-actions .approval-buttons :global(.approval-button) {
+    border-color: var(--color-border-tertiary);
+    border-radius: 4px;
+    background: var(--color-interactive-tertiary);
+    color: var(--color-content-primary);
+    font-size: var(--font-md);
+    letter-spacing: normal;
+    text-transform: none;
+  }
+
+  .pending-approval-card
+    .approval-actions
+    .approval-buttons
+    :global(.approval-button:hover:not(:disabled)) {
+    border-color: var(--color-border-tertiary);
+    background: var(--color-interactive-tertiary-hover);
+    color: var(--color-content-primary);
+  }
+
+  .pending-approval-card
+    .approval-actions
+    .approval-buttons
+    :global(.approval-button:active:not(:disabled)) {
+    border-color: var(--color-border-tertiary);
+    background: var(--color-interactive-tertiary-press);
+  }
+
+  .pending-approval-card
+    .approval-actions
+    .approval-buttons
+    :global(.approval-button.approval-reject) {
+    border-color: var(--color-border-danger);
+    background: var(--color-surface-overlay-danger);
+  }
+
+  .pending-approval-card
+    .approval-actions
+    .approval-buttons
+    :global(.approval-button.approval-reject:hover:not(:disabled)) {
+    border-color: var(--color-border-danger);
+    background: var(--color-surface-danger);
+  }
+
+  .pending-approval-card
+    .approval-actions
+    .approval-buttons
+    :global(.approval-button.approval-reject:active:not(:disabled)) {
+    border-color: var(--color-border-danger);
+    background: var(--color-surface-danger);
   }
 
   .approval-error {
@@ -1932,16 +1986,12 @@
 
   .pending-approvals {
     display: grid;
-    gap: 8px;
-    margin: 0 clamp(18px, 5vw, 72px) 10px;
-    padding: 10px;
-    border: 1px solid color-mix(in srgb, var(--queue) 42%, var(--border));
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--queue) 9%, var(--surface-1));
+    gap: var(--gap-md);
+    margin: 0 clamp(18px, 5vw, 72px) var(--gap-lg);
   }
 
   .agent-chat.embedded .pending-approvals {
-    margin: 0 12px 10px;
+    margin: 0 var(--gap-lg) var(--gap-lg);
   }
 
   .pending-approvals-head {
@@ -1954,34 +2004,34 @@
 
   .pending-approval-list {
     display: grid;
-    gap: 7px;
+    gap: var(--gap-sm);
   }
 
   .pending-approval-card {
     min-width: 0;
     display: grid;
-    gap: 8px;
-    padding: 8px;
-    border: 1px solid color-mix(in srgb, var(--queue) 26%, var(--border));
-    border-radius: var(--radius-md);
-    background: var(--surface-0);
+    gap: var(--gap-md);
+    padding: var(--gutter-tight);
+    border: 1px solid var(--color-border-primary);
+    border-radius: 4px;
+    background: var(--color-surface-primary);
   }
 
   .pending-approval-copy {
     min-width: 0;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--gap-md);
     align-items: baseline;
   }
 
   .pending-approval-copy strong {
-    color: var(--text-1);
+    color: var(--color-content-primary);
     font-size: var(--font-md);
   }
 
   .pending-approval-copy span {
-    color: var(--text-3);
+    color: var(--color-content-secondary);
     font-size: var(--font-sm);
   }
 
