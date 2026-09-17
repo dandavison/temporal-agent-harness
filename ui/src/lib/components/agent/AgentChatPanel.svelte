@@ -25,6 +25,7 @@
   } from "$lib/api/types";
   import { formatTokens } from "$lib/cost/pricing";
   import Chip from "$lib/components/primitives/Chip.svelte";
+  import IconAgent from "$lib/components/primitives/IconAgent.svelte";
   import IconButton from "$lib/components/primitives/IconButton.svelte";
   import StatusChip from "$lib/components/primitives/StatusChip.svelte";
   import { formatLogValue } from "$lib/state/logValue";
@@ -1149,7 +1150,7 @@
         <article class={`message ${message.role}`}>
           {#if message.role === "assistant"}
             <div class="assistant-avatar" aria-hidden="true">
-              <Sparkles size={15} />
+              <IconAgent size={16} />
             </div>
           {/if}
 
@@ -1262,7 +1263,7 @@
       {#if sending && !closed}
         <article class="message assistant">
           <div class="assistant-avatar" aria-hidden="true">
-            <Sparkles size={15} />
+            <IconAgent size={16} />
           </div>
           <div class="bubble thinking">
             <span></span><span></span><span></span>

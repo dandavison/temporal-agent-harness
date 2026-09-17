@@ -44,7 +44,6 @@
 <script lang="ts">
   import {
     AlertTriangle,
-    Bot,
     BrainCircuit,
     CheckCircle2,
     ChevronDown,
@@ -60,6 +59,7 @@
   import { Search, X } from "@lucide/svelte";
   import Badge from "$lib/components/primitives/Badge.svelte";
   import Chip from "$lib/components/primitives/Chip.svelte";
+  import IconAgent from "$lib/components/primitives/IconAgent.svelte";
   import StatusChip from "$lib/components/primitives/StatusChip.svelte";
   import { scrollFollower } from "$lib/state/followScroll";
   import { formatLogValue } from "$lib/state/logValue";
@@ -366,7 +366,7 @@
                   {#if row.actor === "user"}
                     <UserRound size={15} />
                   {:else if row.actor === "agent" || row.actor === "subagent"}
-                    <Bot size={15} />
+                    <IconAgent size={15} />
                   {:else if row.actor === "model"}
                     <Cpu size={15} />
                   {:else if row.actor === "reasoning"}
