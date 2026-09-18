@@ -1770,7 +1770,7 @@
   .activity-line.model .activity-icon { color: var(--model); }
   .activity-line.reasoning .activity-icon { color: var(--reasoning); }
   .activity-line.tool .activity-icon { color: var(--tool); }
-  .activity-line.approval .activity-icon { color: var(--queue); }
+  .activity-line.approval .activity-icon { color: var(--live); }
   .activity-line.done .activity-icon { color: var(--success); }
   .activity-line.error .activity-icon { color: var(--error); }
   .activity-line.turn-summary .activity-icon { color: var(--accent); }

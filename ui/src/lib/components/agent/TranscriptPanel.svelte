@@ -48,10 +48,10 @@
     CheckCircle2,
     ChevronDown,
     ChevronRight,
-    Clock3,
     Cpu,
     MessageSquarePlus,
     Radio,
+    ShieldAlert,
     UserRound,
     Wrench,
     XCircle
@@ -377,7 +377,7 @@
                     {:else if row.tone === "error"}
                       <XCircle size={15} />
                     {:else}
-                      <Clock3 size={15} />
+                      <ShieldAlert size={15} />
                     {/if}
                   {:else if row.actor === "queue"}
                     <MessageSquarePlus size={15} />
@@ -740,7 +740,7 @@
   .log-line.agent .actor-icon { color: var(--accent); }
   .log-line.model .actor-icon { color: var(--model); }
   .log-line.tool .actor-icon { color: var(--tool); }
-  .log-line.approval .actor-icon,
+  .log-line.approval .actor-icon { color: var(--live); }
   .log-line.queue .actor-icon { color: var(--queue); }
   .log-line.done .actor-icon { color: var(--success); }
   .log-line.error .actor-icon { color: var(--error); }
