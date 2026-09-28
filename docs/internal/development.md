@@ -47,6 +47,10 @@ just dev --fresh                  # discard the saved local Temporal database
 just dev --no-watch               # run without restarting workers on file changes
 ```
 
+Example startup with all eight example workers:
+
+![just dev starting Temporal, the session manager, the web server, and eight workers](images/dev-hot-reload.png)
+
 `harness.toml` lists the example registries and worker commands. The runner loads `.env.local`
 without overriding exported variables and skips workers whose required keys are missing.
 Editing a watched path restarts only the workers watching it; editing an agent registry reloads
