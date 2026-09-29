@@ -905,9 +905,12 @@
     return { html: `<${tag}>${items.join("")}</${tag}>`, nextIndex: index };
   }
 
+  /* GFM: `\|` is a pipe inside a cell, not a column break. */
   function splitTableRow(line: string): string[] {
-    const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
-    return trimmed.split("|").map((cell) => moveLeadingCitationsToEnd(cell.trim()));
+    const trimmed = line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "");
+    return trimmed
+      .split(/(?<!\\)\|/)
+      .map((cell) => moveLeadingCitationsToEnd(cell.replaceAll("\\|", "|").trim()));
   }
 
   function isTableDivider(line: string): boolean {
@@ -1091,9 +1094,11 @@
 </div>
 
 <style>
+  /* An implicit `auto` column would size to a wide table's min-content, not the bubble. */
   .markdown-message {
     min-width: 0;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--markdown-block-gap, 9px);
     font-family: var(--markdown-font-family, inherit);
     overflow-wrap: anywhere;
@@ -1245,6 +1250,9 @@
 
 	  .markdown-message :global(th),
 	  .markdown-message :global(td) {
+	    /* Not the `anywhere` inherited from the message: that sets a cell's min-content width to
+	       one character, so auto layout squeezes a column until every word breaks mid-letter. */
+	    overflow-wrap: break-word;
 	    padding: 7px 9px;
 	    border-bottom: 1px solid var(--border);
 	    border-right: 1px solid var(--border);
