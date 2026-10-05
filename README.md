@@ -53,7 +53,7 @@ worth cloning once to watch the whole stack work.
 Clone at a release tag. No Node/pnpm needed: the browser UI ships prebuilt.
 
 ```bash
-git clone --branch 0.5.0 https://github.com/temporal-community/temporal-agent-harness.git
+git clone --branch 0.6.0 https://github.com/temporal-community/temporal-agent-harness.git
 cd temporal-agent-harness
 cp .env.example .env.local   # then set GEMINI_API_KEY (and/or OPENAI_API_KEY)
 ```
@@ -71,13 +71,13 @@ just worker            # 4. this example's agent worker
 
 Open <http://localhost:8000> and start a session. There's no install step — `uv` fetches
 dependencies on demand. Every example follows the same four recipes; see
-[Run the examples](#run-the-examples) for the rest of them, including running all nine behind
+[Run the examples](#run-the-examples) for the rest of them, including running all ten behind
 one UI.
 
 Git will note that you're in "detached HEAD" — that's expected, it just means you're sitting on
 the tag rather than on a branch. Later, move to a newer release with
 `git fetch --tags && git checkout <version>`, or see what changed between two of them with
-`git diff 0.4.0 0.5.0`.
+`git diff 0.5.0 0.6.0`.
 
 ### Build with it — install from PyPI
 
@@ -86,7 +86,7 @@ The harness is published to
 [`uv`](https://docs.astral.sh/uv/)-managed project:
 
 ```bash
-uv add 'temporal-agent-harness[ui]==0.5.0'
+uv add 'temporal-agent-harness[ui]==0.6.0'
 ```
 
 Or declare it in `pyproject.toml` — an ordinary dependency, no `[tool.uv.sources]` needed:
@@ -106,7 +106,7 @@ dependencies = [
     #   s3              S3-backed offload for large payloads
     #
     # What each one pulls in, and when you actually need it, is in the Extras table below.
-    "temporal-agent-harness[ui]==0.5.0",
+    "temporal-agent-harness[ui]==0.6.0",
 ]
 ```
 
@@ -183,14 +183,14 @@ opt-in:
 | Extra | Add it when you… |
 | --- | --- |
 | `ui` | want the browser UI and the `temporal-agent-harness` CLI (pulls in `fastapi[standard]`, including Uvicorn). The built Svelte assets are always in the wheel; only the server runtime is gated here, so agent-worker installs stay small. |
-| `code-mode` | run a worker that hosts **Code Mode** agents; pulls in [`pydantic-monty`](https://pypi.org/project/pydantic-monty/), the sandbox the scripts run in. The workflow-side `agent.code_mode_tool` factory needs nothing extra. |
+| `code-mode` | run a worker that hosts **Code Mode** agents; pulls in [`pydantic-monty`](https://pypi.org/project/pydantic-monty/), the sandbox the scripts run in. Importing `agent` needs nothing extra; building a `code_mode_tool` does. |
 | `genai` | use the **Google Gemini** integration (`ai_sdks.google_genai_plugin`). |
 | `jev` | run a worker whose agents use **`agent.jev_evaluator`**, the builtin AI auto mode evaluator; pulls in [`typesafe-sdk`](https://pypi.org/project/typesafe-sdk/). Worker-side only — the workflow-side factory needs nothing extra. |
 | `openai-agents` | use the **OpenAI Agents SDK** integration (`ai_sdks.openai_agents`). |
 | `pydantic-ai` | use the **Pydantic AI** integration (`ai_sdks.pydantic_ai_harness`). |
 | `s3` | offload large payloads to S3. The default local-filesystem driver needs nothing extra. |
 
-Combine them in one spec, e.g. `uv add 'temporal-agent-harness[ui,code-mode,genai]==0.5.0'`.
+Combine them in one spec, e.g. `uv add 'temporal-agent-harness[ui,code-mode,genai]==0.6.0'`.
 
 ## Versioning and stability
 
@@ -202,7 +202,7 @@ UI matches the source it was built from.
 
 Two artifacts come out of a release, and they pin differently:
 
-- **The library** — pin an exact version from PyPI (`temporal-agent-harness==0.5.0`).
+- **The library** — pin an exact version from PyPI (`temporal-agent-harness==0.6.0`).
 - **The examples** — check out the matching git tag. They are *not* shipped in the package, so a
   PyPI install gives you the library, the packaged UI, and the CLI, but no `examples/` tree.
 
@@ -541,9 +541,16 @@ run_code = agent.code_mode_tool(
 #     asyncio.run(main())
 ```
 
-- **Durable, gated, and observable per call.** The script runs in a sandbox; each host call is
+- **Durable, gated, and observable per call.** The script runs in a sandbox that the workflow
+  steps directly, and replay re-runs it against the recorded host results; each host call is
   dispatched back through the runner as its own durable activity — keeping that tool's approval
   policy and `tool_start`/`tool_end` events. Writing the script is inert; only the host calls act.
+  The script's clock, randomness and `asyncio.sleep` come from the workflow (a sleep is a
+  durable timer), and a script that computes for longer than a second without awaiting a host
+  call is stopped with an error.
+- **Failures are exceptions the script can handle.** A host call that fails (an activity error, a
+  denied approval) raises at its `await`, so the script can `try`/`except` it and carry on;
+  uncaught, it ends the script with an error the model sees.
 - **Type-checked before it runs.** Code Mode generates static type-check stubs from your tools'
   signatures, so a wrong argument or an unknown result key comes back as an error to fix rather
   than a bad run.
@@ -551,12 +558,32 @@ run_code = agent.code_mode_tool(
   straight into `code_mode_tool([...])` — the model's script can drive subagents too.
 - **Several per agent.** Give one agent multiple `code_mode_tool`s (distinct `name`s) over
   disjoint or overlapping tool sets.
+- **A virtual filesystem, if you want one.** Pass `mounts=` and scripts read and write files with
+  plain `open()` and `pathlib`. A mount's backend is any async `FileSystem` your workflow can
+  await (an activity, a Nexus operation, a child workflow) or the built-in
+  `agent.InMemoryFileSystem`, optionally seeded by an activity. Every file operation goes through
+  the runner as an `fs_*` tool call, keeping the approval policy and tool events, and nothing
+  touches the worker's disk. Opt in with `InMemoryFileSystem(state=...)` to keep a filesystem's
+  files in [agent state](#build-a-ui-in-react-or-svelte), so every change streams to the UI.
 
-A worker that hosts a Code Mode agent needs the two sandbox-stepping activities and the durable
-bodies of any activity-backed host tools. Both come from
-[`AgentHarnessPlugin`](#running-a-worker--one-plugin) — the stepping activities as soon as the
-`code-mode` extra (which pulls in [`pydantic-monty`](https://pypi.org/project/pydantic-monty/),
-the sandbox the scripts run in) is installed:
+```python
+run_code = agent.code_mode_tool(
+    tools,
+    name="run_code",
+    mounts=[
+        agent.Mount("/docs", agent.InMemoryFileSystem(seed=self._load_docs), read_only=True,
+                    description="Product docs, one Markdown file per page."),
+        agent.Mount("/workspace", agent.InMemoryFileSystem(), description="Write your output here."),
+    ],
+)
+```
+
+A worker that hosts a Code Mode agent needs the `code-mode` extra (which pulls in
+[`pydantic-monty`](https://pypi.org/project/pydantic-monty/), the sandbox the scripts run in) and
+the durable bodies of any activity-backed host tools, which
+[`AgentHarnessPlugin`](#running-a-worker--one-plugin) registers. Code Mode has no activities of
+its own. A worker without the extra fails the workflow task that builds the tool, so Temporal
+retries it until a worker with the extra picks it up:
 
 ```python
 client = await Client.connect(..., plugins=[AgentHarnessPlugin(tools=my_tools)])
@@ -565,6 +592,8 @@ worker = Worker(client, task_queue=..., workflows=[MyAgent])
 
 See [`examples/monty`](examples/monty) for three agents all built on Code Mode: a no-model script
 runner, a conversational agent that writes its own scripts, and a subagent-driven variant.
+[`examples/code_mode_vfs`](examples/code_mode_vfs) shows a Code Mode tool working on a virtual
+filesystem.
 
 ## Accepted Messages
 
@@ -869,7 +898,7 @@ cp .env.example .env.local
 ```
 
 Set the creds for whichever agents you'll run: `OPENAI_API_KEY` (react_agent, openai_hello,
-pydantic_ai_hello) and/or `GEMINI_API_KEY` (monty, wiki, coding). The default committed
+pydantic_ai_hello) and/or `GEMINI_API_KEY` (monty, wiki, coding, code_mode_vfs). The default committed
 `temporal.local.toml` profile points at a local Temporal dev server.
 
 ### One example, standalone
@@ -899,7 +928,7 @@ each in its own terminal:
 just temporal          # start FRESH (or `just reset-manager` first — see the gotcha)
 just session-manager   # shared session-manager worker
 just server            # serves the MERGED registry (all agents) on http://localhost:8000
-just workers           # co-launch all nine agent workers (Ctrl-C stops them; or run `just worker-<name>` each)
+just workers           # co-launch all ten agent workers (Ctrl-C stops them; or run `just worker-<name>` each)
 ```
 
 Then create a session for any agent in the UI. A few need extra setup or a client:
@@ -913,6 +942,7 @@ Then create a session for any agent in the UI. A few need extra setup or a clien
 | ReAct Agent | `OPENAI_API_KEY`; the **F1 MCP server** at `F1_MCP_SERVER_HOME` ([setup](examples/react_agent/README.md#the-f1-mcp-server)); `just react-client` to answer its `ask_user` (chat alone works in the UI) |
 | Wiki (callback) | `GEMINI_API_KEY`; **`just wiki-client --wiki-dir ./wiki`** — required, or its tool calls hang |
 | Coding (callback) | `GEMINI_API_KEY`; **`just coding-shim <dir>`** + the OpenCode TUI — required |
+| Code Mode VFS | `GEMINI_API_KEY`; a Code Mode tool working on a virtual filesystem ([readme](examples/code_mode_vfs/README.md)); chat directly in the UI |
 | Agent DAG Studio | `OPENAI_API_KEY`; an agent writes a Python flow of agents that Code Mode runs as subagents ([readme](examples/agent_dag/README.md)); best in its own UI, **`just studio`** from `examples/agent_dag` |
 
 **Gotcha — the session manager caches its registry.** The server seeds the `session-manager`
