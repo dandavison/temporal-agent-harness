@@ -18,6 +18,8 @@ from types import TracebackType
 from typing import Any, Self
 
 from temporalio import activity
+from temporalio.api.common.v1 import WorkflowExecution
+from temporalio.api.workflowservice.v1 import DeleteWorkflowExecutionRequest
 from temporalio.client import Client, Plugin
 from temporalio.worker import Worker
 
@@ -59,11 +61,11 @@ class LocalTurns:
         self._plugins = plugins
 
     async def __aenter__(self) -> Self:
-        self._client = await Client.connect(
+        self.client = await Client.connect(
             "local", local_server_module=self._module, plugins=self._plugins
         )
         self._worker = Worker(
-            self._client,
+            self.client,
             task_queue=self._task_queue,
             workflows=self._workflows,
             activities=self._activities,
@@ -81,7 +83,8 @@ class LocalTurns:
 
     @activity.defn(name="run_local_turn")
     async def run_turn(self, turn: LocalTurn) -> LocalTurnResult:
-        handle = await self._client.start_workflow(
+        """Runs the turn's workflow, then deletes it from the local server."""
+        handle = await self.client.start_workflow(
             turn.workflow,
             turn.input,
             id=f"turn-{uuid.uuid4()}",
@@ -89,4 +92,10 @@ class LocalTurns:
         )
         output = await handle.result()
         history = await handle.fetch_history()
+        await self.client.workflow_service.delete_workflow_execution(
+            DeleteWorkflowExecutionRequest(
+                namespace=self.client.namespace,
+                workflow_execution=WorkflowExecution(workflow_id=handle.id),
+            )
+        )
         return LocalTurnResult(output=output, history=history.to_json_dict())
