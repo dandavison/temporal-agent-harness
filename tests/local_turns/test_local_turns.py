@@ -9,26 +9,28 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from temporal_agent_harness.local_turns import LocalTurn, LocalTurnResult, LocalTurns
 from temporalio import activity, workflow
-from temporalio.client import Client
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
-
-from temporal_agent_harness.ai_sdks.openai_agents import (
-    ModelActivityParameters,
-    OpenAIAgentsPlugin,
-)
-from temporal_agent_harness.ai_sdks.openai_agents.testing import (
-    ResponseBuilders,
-    TestModel,
-    TestModelProvider,
-)
 
 with workflow.unsafe.imports_passed_through():
     from agents import Agent, Runner
 
+    from temporal_agent_harness.ai_sdks.openai_agents import (
+        ModelActivityParameters,
+        OpenAIAgentsPlugin,
+    )
+    from temporal_agent_harness.ai_sdks.openai_agents.testing import (
+        ResponseBuilders,
+        TestModel,
+        TestModelProvider,
+    )
     from temporal_agent_harness.ai_sdks.openai_agents.workflow import activity_as_tool
+    from temporal_agent_harness.local_turns import (
+        LocalTurn,
+        LocalTurnResult,
+        LocalTurns,
+    )
 
 
 @activity.defn
@@ -88,7 +90,7 @@ async def test_turn_runs_as_one_server_activity_and_several_local_activities():
             activities=[get_weather],
             plugins=[plugin],
         ) as local_turns:
-            server_client = Client(**env.client.config(), plugins=[plugin])
+            server_client = env.client
             task_queue = f"tq-{uuid.uuid4()}"
             async with Worker(
                 server_client,
