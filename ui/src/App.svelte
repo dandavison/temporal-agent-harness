@@ -809,6 +809,7 @@
           mounts={run.fileMounts}
           live={run.viewIndex >= run.replayTimeline.length}
           onViewFile={(request) => run.viewFile(request)}
+          onOkfGraph={(request) => run.okfGraph(request)}
           onJumpToLive={() => run.jumpToLive()}
         />
       {:else if pane.kind === "decisions"}

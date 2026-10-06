@@ -3154,6 +3154,7 @@ version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "temporalio" },
 ]
 
@@ -3233,6 +3234,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", extras = ["temporal"], marker = "extra == 'pydantic-ai'", specifier = ">=2.13" },
     { name = "pydantic-monty", marker = "extra == 'code-mode'", specifier = "==1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "temporal-nexus-mcp", marker = "extra == 'nexus-mcp'", editable = "nexus/mcp" },
     { name = "temporalio", specifier = ">=1.31.0" },
     { name = "temporalio", extras = ["aioboto3"], marker = "extra == 's3'", specifier = ">=1.31.0" },
