@@ -9,7 +9,9 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
+import pytest
 from temporalio import activity, workflow
+from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -106,6 +108,14 @@ async def test_turn_runs_as_one_server_activity_and_several_local_activities():
                 )
                 result = await handle.result()
             server_history = (await handle.fetch_history()).to_json_dict()
+            local_workflow_id = result.history["events"][0][
+                "workflowExecutionStartedEventAttributes"
+            ]["workflowId"]
+            with pytest.raises(RPCError) as err:
+                await local_turns.client.get_workflow_handle(
+                    local_workflow_id
+                ).fetch_history()
+            assert err.value.status == RPCStatusCode.NOT_FOUND
     finally:
         await env.shutdown()
 
