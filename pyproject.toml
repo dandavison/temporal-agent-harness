@@ -165,6 +165,9 @@ include = ["temporal_agent_harness*"]
 
 [tool.uv.sources]
 temporal-nexus-mcp = { path = "nexus/mcp", editable = true }
+# The local-workflow prototype needs sdk-python's local_server_module connect option, which exists
+# only on the local-workflow-progress branch.
+temporalio = { path = "../../../sdk-python/local-workflow-progress/sdk-python", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
