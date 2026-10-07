@@ -19,7 +19,7 @@ local server, both on unmerged branches (below).
 
 ## Build and run
 
-You need git, Go, Rust (rustup) and uv. In an empty directory:
+You need git, Go, Rust (rustup), protoc (`brew install protobuf` or `apt-get install protobuf-compiler`) and uv. In an empty directory:
 
 ```sh
 git clone --depth 1 --branch local-chasm https://github.com/dandavison/temporal-agent-harness

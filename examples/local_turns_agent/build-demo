@@ -2,8 +2,12 @@
 # Clones, next to this temporal-agent-harness checkout, the other branches the local-turns demo
 # needs, and builds them: a Temporal CLI whose dev server supports local execution
 # (bin/temporal), the local-server module, and the Python SDK with its bridge. Needs git, Go,
-# Rust (rustup) and uv. Safe to rerun: existing checkouts are kept.
+# Rust (rustup), protoc and uv. Safe to rerun: existing checkouts are kept.
 set -euo pipefail
+
+for command in git go cargo protoc uv; do
+  command -v "$command" >/dev/null || { echo "build-demo needs $command" >&2; exit 1; }
+done
 
 harness="$(cd "$(dirname "$0")/../.." && pwd)"
 ws="$(dirname "$harness")"
