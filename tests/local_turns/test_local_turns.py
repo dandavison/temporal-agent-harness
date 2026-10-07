@@ -10,8 +10,7 @@ from datetime import timedelta
 from typing import Any
 
 from temporalio import activity, workflow
-from temporalio.client import WorkflowHistory
-from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.client import Client, WorkflowHistory
 from temporalio.worker import LocalExecution, Worker
 
 with workflow.unsafe.imports_passed_through():
@@ -79,21 +78,22 @@ async def test_turn_runs_as_a_local_child_workflow_synced_to_the_server():
         ),
         model_provider=TestModelProvider(model),
     )
-    env = await start_local_execution_server(data_converter=pydantic_data_converter)
+    env = await start_local_execution_server()
     try:
+        # The plugin sets the client's data converter for the model activities' arguments.
+        client = Client(**{**env.client.config(), "plugins": [plugin]})
         task_queue = f"tq-{uuid.uuid4()}"
         async with (
             Worker(
-                env.client,
+                client,
                 task_queue=TURN_TASK_QUEUE,
                 workflows=[WeatherTurn],
                 activities=[get_weather],
-                plugins=[plugin],
                 local_execution=LocalExecution(),
             ),
-            Worker(env.client, task_queue=task_queue, workflows=[WeatherAgent]),
+            Worker(client, task_queue=task_queue, workflows=[WeatherAgent]),
         ):
-            handle = await env.client.start_workflow(
+            handle = await client.start_workflow(
                 WeatherAgent.run,
                 "What is the weather in Boston?",
                 id=f"wf-{uuid.uuid4()}",
@@ -102,7 +102,7 @@ async def test_turn_runs_as_a_local_child_workflow_synced_to_the_server():
             result = await handle.result()
         agent_history = await handle.fetch_history()
         turn_id = child_workflow_ids(agent_history)[0]
-        turn_history = await env.client.get_workflow_handle(turn_id).fetch_history()
+        turn_history = await client.get_workflow_handle(turn_id).fetch_history()
     finally:
         await env.shutdown()
 

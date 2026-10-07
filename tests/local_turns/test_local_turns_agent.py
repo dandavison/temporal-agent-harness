@@ -13,7 +13,6 @@ from typing import Any, TypeVar
 
 from temporalio import activity, workflow
 from temporalio.client import Client, WorkflowHandle
-from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.worker import LocalExecution, Worker
 
@@ -71,23 +70,22 @@ async def test_agent_turn_runs_as_a_local_child_workflow():
         ),
         model_provider=TestModelProvider(model),
     )
-    env = await start_local_execution_server(data_converter=pydantic_data_converter)
+    env = await start_local_execution_server()
     try:
+        # The plugin sets the client's data converter for the model activities' arguments.
+        client = Client(**{**env.client.config(), "plugins": [plugin]})
         task_queue = f"tq-{uuid.uuid4()}"
         async with (
             Worker(
-                env.client,
+                client,
                 task_queue=TURN_TASK_QUEUE,
                 workflows=[WeatherTurn],
                 activities=[gated_get_weather],
-                plugins=[plugin],
                 local_execution=LocalExecution(),
             ),
-            Worker(
-                env.client, task_queue=task_queue, workflows=[LocalTurnsAgentWorkflow]
-            ),
+            Worker(client, task_queue=task_queue, workflows=[LocalTurnsAgentWorkflow]),
         ):
-            agent = await env.client.start_workflow(
+            agent = await client.start_workflow(
                 LocalTurnsAgentWorkflow.run,
                 AgentConfig(),
                 id=f"agent-{uuid.uuid4()}",
@@ -106,19 +104,17 @@ async def test_agent_turn_runs_as_a_local_child_workflow():
             )
 
             # While the turn waits in its tool call, the server shows its model call...
-            turn = await eventually(lambda: turn_handle(env.client, agent))
+            turn = await eventually(lambda: turn_handle(client, agent))
             await eventually(lambda: activity_completed(turn))
             # ...and the agent workflow serves a query and the updates that read its events.
             status = await agent.query(AGENT_STATUS_QUERY, result_type=AgentStatus)
             assert status.turn_active
-            events = await turn_events(
-                env.client, agent.id, AgentEventType.TURN_STARTED
-            )
+            events = await turn_events(client, agent.id, AgentEventType.TURN_STARTED)
             assert events[-1].event.type == AgentEventType.TURN_STARTED
 
             weather_may_return.set()
             await reply
-            events = await turn_events(env.client, agent.id, AgentEventType.TURN_END)
+            events = await turn_events(client, agent.id, AgentEventType.TURN_END)
             agent_history = (await agent.fetch_history()).to_json_dict()
             turn_history = (await turn.fetch_history()).to_json_dict()
     finally:
