@@ -8,11 +8,10 @@ process, so that the turn's model and tool calls make no calls to the server. It
 history to the server at each sync interval and when the turn closes. The server must support local
 execution (temporalio/temporal branch sj/local-first-execution).
 
-The local server keeps its state in memory. If the worker process dies mid-turn, the turn is stuck:
-the server's ownership expiry covers only a turn whose first workflow task has not completed (see
-sdk-python tests/worker/test_local_child_workflow.py). The local server can take ownership of new
-turns only, so even once expiry works, a turn whose owner died can continue only on a worker
-connected to the server itself.
+The local server keeps its state in memory. If the worker process dies mid-turn, the server takes
+the turn back once its ownership expires (three sync intervals), and the turn continues from its
+last synced history on a worker connected to the server itself: the local server can take ownership
+of new turns only.
 """
 
 from __future__ import annotations
