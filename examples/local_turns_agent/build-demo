@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Clones, next to this temporal-agent-harness checkout, the other branches the local-turns demo
+# needs, and builds them: a Temporal CLI whose dev server supports local execution
+# (server/temporal), the local-server module, and the Python SDK with its bridge. Needs git, Go,
+# Rust (rustup) and uv. Safe to rerun: existing checkouts are kept.
+set -euo pipefail
+
+harness="$(cd "$(dirname "$0")/../.." && pwd)"
+ws="$(dirname "$harness")"
+
+clone() { # <github repo> <directory> <branch>
+  [ -d "$ws/$2" ] || git clone --quiet --depth 1 --branch "$3" "https://github.com/$1" "$ws/$2"
+}
+clone dandavison/temporalio-temporal temporal local-chasm
+clone dandavison/temporalio-temporal server/temporal local-chasm-spencer-wf-lease
+clone dandavison/temporalio-api-go server/temporal-api-go local-chasm
+clone dandavison/temporalio-cli server/cli local-chasm
+clone dandavison/temporalio-sdk-python sdk-python local-chasm
+
+# sdk-python's sdk-core submodule commit is on the dandavison/temporalio-sdk-core fork.
+core="$ws/sdk-python/temporalio/bridge/sdk-core"
+if [ ! -e "$core/.git" ]; then
+  rmdir "$core" 2>/dev/null || true
+  git init --quiet "$core"
+  git -C "$core" fetch --quiet --depth 1 https://github.com/dandavison/temporalio-sdk-core \
+    "$(git -C "$ws/sdk-python" rev-parse HEAD:temporalio/bridge/sdk-core)"
+  git -C "$core" checkout --quiet FETCH_HEAD
+fi
+
+cat > "$ws/server/go.work" <<'WORK'
+go 1.27.0
+
+use (
+	./cli
+	./cli/cliext
+)
+
+replace (
+	go.temporal.io/server => ./temporal
+	go.temporal.io/api => ./temporal-api-go
+)
+WORK
+(cd "$ws/server/cli" && GOFLAGS=-buildvcs=false go build -o ../temporal ./cmd/temporal)
+
+"$ws/sdk-python/scripts/build-local-server-module" "$ws/temporal"
+
+# Builds sdk-python's bridge (in release mode) and installs it with the harness's dependencies.
+(cd "$harness" && MATURIN_PEP517_ARGS="--profile release" uv sync --group examples)

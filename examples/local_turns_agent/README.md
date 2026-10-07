@@ -17,69 +17,42 @@ local server, both on unmerged branches (below).
 | `workflow.py` | `LocalTurnsAgentWorkflow`, the agent workflow; `WeatherTurn`, one turn: the OpenAI Agents SDK loop with a `get_weather` tool that takes 3 seconds. |
 | `demo.py` | Runs the agent workflow's worker and the turn worker, which has local execution; starts an agent, and chats with it in the terminal. |
 
-## Build
+## Build and run
 
-You need Go, Rust and `uv`.
-
-1. **A Temporal CLI whose dev server supports local execution.** Check out, side by side in one
-   directory:
-   - `temporal`: [dandavison/temporalio-temporal:local-chasm-spencer-wf-lease](https://github.com/dandavison/temporalio-temporal/tree/local-chasm-spencer-wf-lease) (Spencer Judge's `sj/local-first-execution`, plus a fix for lease expiry);
-   - `temporal-api-go`: [dandavison/temporalio-api-go:local-chasm](https://github.com/dandavison/temporalio-api-go/tree/local-chasm) (the server's `go.mod` replaces `go.temporal.io/api` with `../temporal-api-go`);
-   - `cli`: [dandavison/temporalio-cli:local-chasm](https://github.com/dandavison/temporalio-cli/tree/local-chasm).
-
-   Then, in that directory, create a `go.work` and build:
-
-   ```sh
-   cat > go.work <<'EOF'
-   go 1.26.5
-
-   use (
-   	./cli
-   	./cli/cliext
-   )
-
-   replace (
-   	go.temporal.io/server => ./temporal
-   	go.temporal.io/api => ./temporal-api-go
-   )
-   EOF
-   (cd cli && go build -o ../temporal ./cmd/temporal)
-   ```
-
-2. **The Python SDK and the local-server module.** This repo's `pyproject.toml` takes `temporalio`,
-   and the `temporalio-localserver` package that holds the module, from
-   `../../../sdk-python/local-workflow-progress/sdk-python`, a checkout of
-   [dandavison/temporalio-sdk-python:local-chasm](https://github.com/dandavison/temporalio-sdk-python/tree/local-chasm)
-   whose `temporalio/bridge/sdk-core` submodule is at the commit the branch records, from
-   [dandavison/temporalio-sdk-core:local-chasm](https://github.com/dandavison/temporalio-sdk-core/tree/local-chasm).
-   In that checkout, build the module into `temporalio-localserver` from a checkout of
-   [dandavison/temporalio-temporal:local-chasm](https://github.com/dandavison/temporalio-temporal/tree/local-chasm),
-   and build the bridge in release mode (a debug build is about 15 times slower):
-
-   ```sh
-   scripts/build-local-server-module <temporal local-chasm checkout>
-   uv run maturin develop --uv --release
-   ```
-
-## Run
-
-In one terminal, start the dev server built in step 1, with local execution enabled:
+You need git, Go, Rust (rustup) and uv. In an empty directory:
 
 ```sh
-./temporal server start-dev --dynamic-config-value history.enableLocalExecution=true
+git clone --depth 1 --branch local-chasm https://github.com/dandavison/temporal-agent-harness
+temporal-agent-harness/examples/local_turns_agent/build-demo
 ```
 
-In another, from this repo's root:
+[`build-demo`](build-demo) clones the other branches next to `temporal-agent-harness` and builds
+them:
+
+| Directory | Branch | Built |
+|---|---|---|
+| `server/temporal`, `server/temporal-api-go`, `server/cli` | `local-chasm-spencer-wf-lease` of [dandavison/temporalio-temporal](https://github.com/dandavison/temporalio-temporal/tree/local-chasm-spencer-wf-lease) (Spencer Judge's `sj/local-first-execution`, plus a fix for lease expiry); `local-chasm` of [dandavison/temporalio-api-go](https://github.com/dandavison/temporalio-api-go/tree/local-chasm) and [dandavison/temporalio-cli](https://github.com/dandavison/temporalio-cli/tree/local-chasm) | `server/temporal`: a Temporal CLI whose dev server supports local execution |
+| `temporal` | `local-chasm` of [dandavison/temporalio-temporal](https://github.com/dandavison/temporalio-temporal/tree/local-chasm) | the local-server wasm module, into `sdk-python/temporalio-localserver` |
+| `sdk-python` | `local-chasm` of [dandavison/temporalio-sdk-python](https://github.com/dandavison/temporalio-sdk-python/tree/local-chasm), with its `sdk-core` submodule from [dandavison/temporalio-sdk-core](https://github.com/dandavison/temporalio-sdk-core/tree/local-chasm) | the SDK's bridge, installed in this repo's environment |
+
+Then start the dev server, with local execution enabled:
 
 ```sh
+server/temporal server start-dev --dynamic-config-value history.enableLocalExecution=true
+```
+
+and, in another terminal, the demo:
+
+```sh
+cd temporal-agent-harness
 OPENAI_API_KEY=... uv run --group examples python -m examples.local_turns_agent.demo
 ```
 
-The first run compiles the module, which takes about 2 seconds and 1.8 GB of memory on an M-series
-Mac; the compiled code is cached, and later runs load it in about 0.2 seconds.
-
 The demo prints the agent workflow's URL in the Temporal UI (http://localhost:8233). Ask, for
 example, "What's the weather in Boston?". The agent's model is `MODEL` in `workflow.py`.
+
+The first run compiles the module, which takes about 2 seconds and 1.8 GB of memory on an M-series
+Mac; the compiled code is cached, and later runs load it in about 0.2 seconds.
 
 ## What to look at in the UI
 

@@ -3236,10 +3236,10 @@ requires-dist = [
     { name = "pydantic-ai-slim", extras = ["temporal"], marker = "extra == 'pydantic-ai'", specifier = ">=2.13" },
     { name = "pydantic-monty", marker = "extra == 'code-mode'", specifier = "==1.0.0" },
     { name = "temporal-nexus-mcp", marker = "extra == 'nexus-mcp'", editable = "nexus/mcp" },
-    { name = "temporalio", editable = "../../../sdk-python/local-workflow-progress/sdk-python" },
-    { name = "temporalio", extras = ["aioboto3"], marker = "extra == 's3'", editable = "../../../sdk-python/local-workflow-progress/sdk-python" },
-    { name = "temporalio", extras = ["opentelemetry"], marker = "extra == 'nexus-mcp'", editable = "../../../sdk-python/local-workflow-progress/sdk-python" },
-    { name = "temporalio", extras = ["opentelemetry"], marker = "extra == 'openai-agents'", editable = "../../../sdk-python/local-workflow-progress/sdk-python" },
+    { name = "temporalio", editable = "../sdk-python" },
+    { name = "temporalio", extras = ["aioboto3"], marker = "extra == 's3'", editable = "../sdk-python" },
+    { name = "temporalio", extras = ["opentelemetry"], marker = "extra == 'nexus-mcp'", editable = "../sdk-python" },
+    { name = "temporalio", extras = ["opentelemetry"], marker = "extra == 'openai-agents'", editable = "../sdk-python" },
     { name = "typesafe-sdk", marker = "extra == 'jev'", specifier = ">=0.6.0" },
 ]
 provides-extras = ["genai", "s3", "openai-agents", "pydantic-ai", "ui", "code-mode", "jev", "nexus-mcp"]
@@ -3262,9 +3262,9 @@ dev = [
     { name = "pytest-benchmark", specifier = ">=5.1.0" },
     { name = "setuptools", specifier = ">=83.0.0" },
     { name = "temporal-nexus-mcp", editable = "nexus/mcp" },
-    { name = "temporalio", extras = ["aioboto3"], editable = "../../../sdk-python/local-workflow-progress/sdk-python" },
-    { name = "temporalio", extras = ["opentelemetry"], editable = "../../../sdk-python/local-workflow-progress/sdk-python" },
-    { name = "temporalio-localserver", editable = "../../../sdk-python/local-workflow-progress/sdk-python/temporalio-localserver" },
+    { name = "temporalio", extras = ["aioboto3"], editable = "../sdk-python" },
+    { name = "temporalio", extras = ["opentelemetry"], editable = "../sdk-python" },
+    { name = "temporalio-localserver", editable = "../sdk-python/temporalio-localserver" },
     { name = "typesafe-sdk", specifier = ">=0.6.0" },
 ]
 examples = [
@@ -3275,7 +3275,7 @@ examples = [
     { name = "openai-agents", specifier = ">=0.22.0" },
     { name = "pydantic-ai-slim", extras = ["temporal"], specifier = ">=2.13" },
     { name = "pydantic-monty", specifier = "==1.0.0" },
-    { name = "temporalio-localserver", editable = "../../../sdk-python/local-workflow-progress/sdk-python/temporalio-localserver" },
+    { name = "temporalio-localserver", editable = "../sdk-python/temporalio-localserver" },
     { name = "typesafe-sdk", specifier = ">=0.6.0" },
 ]
 
@@ -3316,7 +3316,7 @@ dev = [
 [[package]]
 name = "temporalio"
 version = "1.34.0"
-source = { editable = "../../../sdk-python/local-workflow-progress/sdk-python" }
+source = { editable = "../sdk-python" }
 dependencies = [
     { name = "nexus-rpc" },
     { name = "protobuf" },
@@ -3362,7 +3362,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'pydantic'", specifier = ">=2.0.0,<3" },
     { name = "python-dateutil", marker = "python_full_version < '3.11'", specifier = ">=2.8.2,<3" },
     { name = "strands-agents", marker = "extra == 'strands-agents'", specifier = ">=1.51.0" },
-    { name = "temporalio-localserver", marker = "extra == 'local'", editable = "../../../sdk-python/local-workflow-progress/sdk-python/temporalio-localserver" },
+    { name = "temporalio-localserver", marker = "extra == 'local'", editable = "../sdk-python/temporalio-localserver" },
     { name = "temporalio-openai-agents", marker = "extra == 'openai-agents'", specifier = ">=1.0.0" },
     { name = "types-aioboto3", extras = ["s3"], marker = "extra == 'aioboto3'", specifier = ">=10.4.0" },
     { name = "types-protobuf", specifier = ">=3.20,<8.0.0" },
@@ -3411,7 +3411,7 @@ dev = [
     { name = "setuptools", specifier = "<82" },
     { name = "strands-agents", specifier = ">=1.51.0" },
     { name = "strands-agents-tools", specifier = ">=0.5.2" },
-    { name = "temporalio-localserver", editable = "../../../sdk-python/local-workflow-progress/sdk-python/temporalio-localserver" },
+    { name = "temporalio-localserver", editable = "../sdk-python/temporalio-localserver" },
     { name = "temporalio-openai-agents", specifier = ">=1.0.0" },
     { name = "toml", specifier = ">=0.10.2,<0.11" },
     { name = "twine", specifier = ">=4.0.1,<5" },
@@ -3420,7 +3420,7 @@ dev = [
 [[package]]
 name = "temporalio-localserver"
 version = "0.1.0"
-source = { editable = "../../../sdk-python/local-workflow-progress/sdk-python/temporalio-localserver" }
+source = { editable = "../sdk-python/temporalio-localserver" }
 
 [[package]]
 name = "tenacity"

@@ -168,9 +168,10 @@ include = ["temporal_agent_harness*"]
 [tool.uv.sources]
 temporal-nexus-mcp = { path = "nexus/mcp", editable = true }
 # The local-execution prototype needs sdk-python's LocalExecution worker option and its
-# temporalio-localserver package, which exist only on sdk-python's local-chasm branch.
-temporalio = { path = "../../../sdk-python/local-workflow-progress/sdk-python", editable = true }
-temporalio-localserver = { path = "../../../sdk-python/local-workflow-progress/sdk-python/temporalio-localserver", editable = true }
+# temporalio-localserver package, which exist only on sdk-python's local-chasm branch, checked
+# out next to this repo.
+temporalio = { path = "../sdk-python", editable = true }
+temporalio-localserver = { path = "../sdk-python/temporalio-localserver", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
