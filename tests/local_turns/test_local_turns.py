@@ -1,18 +1,18 @@
-"""A server-hosted agent workflow runs a turn as one activity, which runs the turn's model and tool
-calls as a local workflow in the worker process.
+"""A server-hosted agent workflow runs a turn as a child workflow that the server owns and the
+worker process runs: the local server acquires the child from the server, runs the turn's model and
+tool calls in-process, and syncs the child's history to the server.
 
-Requires TEMPORAL_LOCAL_SERVER_MODULE: the path of a precompiled local-server module (.cwasm).
+Requirements: see tests/local_turns/server.py.
 """
 
-import os
 import uuid
 from datetime import timedelta
 from typing import Any
 
 import pytest
 from temporalio import activity, workflow
+from temporalio.client import WorkflowHistory
 from temporalio.service import RPCError, RPCStatusCode
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 with workflow.unsafe.imports_passed_through():
@@ -28,10 +28,11 @@ with workflow.unsafe.imports_passed_through():
         TestModelProvider,
     )
     from temporal_agent_harness.ai_sdks.openai_agents.workflow import activity_as_tool
-    from temporal_agent_harness.local_turns import (
-        LocalTurn,
-        LocalTurnResult,
-        LocalTurns,
+    from temporal_agent_harness.local_turns import LocalTurns, run_local_turn
+    from tests.local_turns.server import (
+        local_server_module,
+        start_local_execution_server,
+        target_host,
     )
 
 
@@ -60,18 +61,14 @@ class WeatherTurn:
 
 @workflow.defn
 class WeatherAgent:
-    """The server-hosted agent: each turn is one activity."""
+    """The server-hosted agent: each turn is a local child workflow."""
 
     @workflow.run
-    async def run(self, prompt: str) -> LocalTurnResult:
-        return await workflow.execute_activity(
-            LocalTurns.run_turn,
-            LocalTurn(workflow="WeatherTurn", input=prompt),
-            start_to_close_timeout=timedelta(seconds=60),
-        )
+    async def run(self, prompt: str) -> str:
+        return await run_local_turn("WeatherTurn", prompt, result_type=str)
 
 
-async def test_turn_runs_as_one_server_activity_and_several_local_activities():
+async def test_turn_runs_as_a_local_child_workflow_synced_to_the_server():
     model = TestModel.returning_responses(
         [
             ResponseBuilders.tool_call('{"city":"Boston"}', "get_weather"),
@@ -84,47 +81,50 @@ async def test_turn_runs_as_one_server_activity_and_several_local_activities():
         ),
         model_provider=TestModelProvider(model),
     )
-    env = await WorkflowEnvironment.start_local()
+    env = await start_local_execution_server()
     try:
         async with LocalTurns(
-            os.environ["TEMPORAL_LOCAL_SERVER_MODULE"],
+            local_server_module(),
+            target_host(env),
             workflows=[WeatherTurn],
             activities=[get_weather],
             plugins=[plugin],
         ) as local_turns:
-            server_client = env.client
             task_queue = f"tq-{uuid.uuid4()}"
             async with Worker(
-                server_client,
-                task_queue=task_queue,
-                workflows=[WeatherAgent],
-                activities=[local_turns.run_turn],
+                env.client, task_queue=task_queue, workflows=[WeatherAgent]
             ):
-                handle = await server_client.start_workflow(
+                handle = await env.client.start_workflow(
                     WeatherAgent.run,
                     "What is the weather in Boston?",
                     id=f"wf-{uuid.uuid4()}",
                     task_queue=task_queue,
                 )
                 result = await handle.result()
-            server_history = (await handle.fetch_history()).to_json_dict()
-            local_workflow_id = result.history["events"][0][
-                "workflowExecutionStartedEventAttributes"
-            ]["workflowId"]
+            agent_history = await handle.fetch_history()
+            turn_id = child_workflow_ids(agent_history)[0]
+            turn_history = await env.client.get_workflow_handle(turn_id).fetch_history()
+            # The local server deleted the turn once it handed it back to the server.
             with pytest.raises(RPCError) as err:
-                await local_turns.client.get_workflow_handle(
-                    local_workflow_id
-                ).fetch_history()
+                await local_turns.client.get_workflow_handle(turn_id).fetch_history()
             assert err.value.status == RPCStatusCode.NOT_FOUND
     finally:
         await env.shutdown()
 
-    assert result.output == "It is sunny in Boston."
-    assert scheduled_activities(server_history) == ["run_local_turn"]
-    assert scheduled_activities(result.history) == [
+    assert result == "It is sunny in Boston."
+    assert scheduled_activities(agent_history.to_json_dict()) == []
+    assert scheduled_activities(turn_history.to_json_dict()) == [
         "invoke_model_activity",
         "get_weather",
         "invoke_model_activity",
+    ]
+
+
+def child_workflow_ids(history: WorkflowHistory) -> list[str]:
+    return [
+        e.child_workflow_execution_started_event_attributes.workflow_execution.workflow_id
+        for e in history.events
+        if e.HasField("child_workflow_execution_started_event_attributes")
     ]
 
 
