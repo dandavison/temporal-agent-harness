@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Clones, next to this temporal-agent-harness checkout, the other branches the local-turns demo
 # needs, and builds them: a Temporal CLI whose dev server supports local execution
-# (server/temporal), the local-server module, and the Python SDK with its bridge. Needs git, Go,
+# (bin/temporal), the local-server module, and the Python SDK with its bridge. Needs git, Go,
 # Rust (rustup) and uv. Safe to rerun: existing checkouts are kept.
 set -euo pipefail
 
@@ -40,7 +40,8 @@ replace (
 	go.temporal.io/api => ./temporal-api-go
 )
 WORK
-(cd "$ws/server/cli" && GOFLAGS=-buildvcs=false go build -o ../temporal ./cmd/temporal)
+mkdir -p "$ws/bin"
+(cd "$ws/server/cli" && GOFLAGS=-buildvcs=false go build -o "$ws/bin/temporal" ./cmd/temporal)
 
 "$ws/sdk-python/scripts/build-local-server-module" "$ws/temporal"
 

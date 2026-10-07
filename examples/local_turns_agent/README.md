@@ -31,14 +31,14 @@ them:
 
 | Directory | Branch | Built |
 |---|---|---|
-| `server/temporal`, `server/temporal-api-go`, `server/cli` | `local-chasm-spencer-wf-lease` of [dandavison/temporalio-temporal](https://github.com/dandavison/temporalio-temporal/tree/local-chasm-spencer-wf-lease) (Spencer Judge's `sj/local-first-execution`, plus a fix for lease expiry); `local-chasm` of [dandavison/temporalio-api-go](https://github.com/dandavison/temporalio-api-go/tree/local-chasm) and [dandavison/temporalio-cli](https://github.com/dandavison/temporalio-cli/tree/local-chasm) | `server/temporal`: a Temporal CLI whose dev server supports local execution |
+| `server/temporal`, `server/temporal-api-go`, `server/cli` | `local-chasm-spencer-wf-lease` of [dandavison/temporalio-temporal](https://github.com/dandavison/temporalio-temporal/tree/local-chasm-spencer-wf-lease) (Spencer Judge's `sj/local-first-execution`, plus a fix for lease expiry); `local-chasm` of [dandavison/temporalio-api-go](https://github.com/dandavison/temporalio-api-go/tree/local-chasm) and [dandavison/temporalio-cli](https://github.com/dandavison/temporalio-cli/tree/local-chasm) | `bin/temporal`: a Temporal CLI whose dev server supports local execution |
 | `temporal` | `local-chasm` of [dandavison/temporalio-temporal](https://github.com/dandavison/temporalio-temporal/tree/local-chasm) | the local-server wasm module, into `sdk-python/temporalio-localserver` |
 | `sdk-python` | `local-chasm` of [dandavison/temporalio-sdk-python](https://github.com/dandavison/temporalio-sdk-python/tree/local-chasm), with its `sdk-core` submodule from [dandavison/temporalio-sdk-core](https://github.com/dandavison/temporalio-sdk-core/tree/local-chasm) | the SDK's bridge, installed in this repo's environment |
 
 Then start the dev server, with local execution enabled:
 
 ```sh
-server/temporal server start-dev --dynamic-config-value history.enableLocalExecution=true
+bin/temporal server start-dev --dynamic-config-value history.enableLocalExecution=true
 ```
 
 and, in another terminal, the demo:
