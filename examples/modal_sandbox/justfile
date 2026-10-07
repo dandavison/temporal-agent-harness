@@ -1,0 +1,44 @@
+# Scoped justfile for the Modal sandbox example (examples/modal_sandbox).
+# Run from this directory: `just <recipe>`.
+#
+# Self-contained local stack (each in its own terminal):
+#   just temporal          # 1. local Temporal dev server (or bring your own)
+#   just session-manager   # 2. packaged session-manager worker
+#   just server            # 3. FastAPI API + UI on :8000
+#   just worker            # 4. this example's agent worker (needs Modal credentials)
+#
+# Then open http://localhost:8000, pick "Modal Coding Agent", and give it a task. See README.md.
+#
+# The Modal SDK is not in any dependency group; `just worker` adds it with `--with`. It is newer than
+# the `modal==1.4.3` that openai-agents' `modal` extra pins: on 1.4.3, `Sandbox.exec` hangs (the
+# sandbox starts, but no command ever runs), which stalls the agent's first sandbox start.
+
+# Shows a notice when running from an untagged commit (silent on a release archive).
+import '../../scripts/untagged-notice.just'
+
+# Read the single shared env file at the repo root (resolved relative to this justfile).
+set dotenv-path := "../../.env.local"
+set dotenv-load := true
+
+root := justfile_directory() / ".." / ".."
+modal_sdk := "modal==1.6.1"
+
+# List available recipes (bare `just`).
+default:
+    @just --list
+
+# Start a local Temporal dev server (Web UI: http://localhost:8233; needs the `temporal` CLI).
+temporal:
+    temporal server start-dev
+
+# Run the packaged session-manager worker (`temporal-agent-harness session-manager`).
+session-manager:
+    cd "{{root}}" && uv run --group examples temporal-agent-harness session-manager
+
+# Serve the packaged FastAPI API + UI on http://localhost:8000, pointed at this example's registry.
+server:
+    cd "{{root}}" && uv run --group examples temporal-agent-harness serve "{{justfile_directory()}}/agents.toml" --host 0.0.0.0 --port 8000
+
+# Run the ModalCodingAgent worker.
+worker:
+    cd "{{root}}" && uv run --group examples --with '{{modal_sdk}}' python -m examples.modal_sandbox.worker

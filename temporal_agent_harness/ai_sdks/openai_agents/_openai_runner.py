@@ -22,7 +22,7 @@ from typing_extensions import Unpack
 from temporalio import workflow
 from temporal_agent_harness.ai_sdks.openai_agents._model_parameters import ModelActivityParameters
 from temporal_agent_harness.ai_sdks.openai_agents._temporal_model_stub import _TemporalModelStub
-from temporal_agent_harness.ai_sdks.openai_agents.sandbox._temporal_sandbox_client import (
+from temporal_agent_harness.harness.sandbox._client import (
     TemporalSandboxClient,
 )
 from temporal_agent_harness.ai_sdks.openai_agents.workflow import AgentsWorkflowError

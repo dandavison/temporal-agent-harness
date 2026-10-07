@@ -1,8 +1,8 @@
 """Workflow-side helpers for the Interactions API.
 
-Currently exports just :func:`function_param` — a small helper that turns a tool
-callable into an Interactions-API ``FunctionParam`` dict so the workflow can declare it
-as a tool. Pass a tool defined with :func:`harness.agent.activity_tool_defn` or
+Exports :func:`function_param` — a small helper that turns a tool callable into an
+Interactions-API ``FunctionParam`` dict so the workflow can declare it as a tool — and
+:func:`function_result_value`, which turns the tool's return value into a function result. Pass a tool defined with :func:`harness.agent.activity_tool_defn` or
 :func:`harness.agent.tool_defn`; the workflow drives the tool-calling loop itself,
 executing each call via :meth:`~harness.agent_workflow.AgentWorkflowRunner.run_tool`.
 
@@ -20,6 +20,22 @@ from typing import Any
 
 from google.genai.types import FunctionDeclaration
 from google.genai._interactions.types import FunctionParam
+
+from temporal_agent_harness.harness.sandbox_image import SandboxImage
+
+# The image types a Gemini function result may carry (``ImageContentParam.mime_type``).
+_GEMINI_IMAGE_MIME_TYPES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+        "image/gif",
+        "image/bmp",
+        "image/tiff",
+    }
+)
 
 
 def function_param(fn: Any) -> FunctionParam:
@@ -54,3 +70,19 @@ def function_param(fn: Any) -> FunctionParam:
         "description": inspect.cleandoc(fn.__doc__) if fn.__doc__ else "",
         "parameters": parameters,
     }
+
+
+def function_result_value(result: Any) -> Any:
+    """The ``result`` of a ``function_result`` step for a tool's return value.
+
+    A :class:`~temporal_agent_harness.harness.sandbox_image.SandboxImage` (what a sandbox
+    ``view_image`` tool returns) becomes an image content block, so the model sees the
+    image; an image type Gemini does not accept, and every other value, becomes its
+    ``str()``::
+
+        {"type": "function_result", "call_id": call.id, "name": call.name,
+         "result": function_result_value(await runner.run_tool(call.id, tool, **call.arguments))}
+    """
+    if isinstance(result, SandboxImage) and result.mime_type in _GEMINI_IMAGE_MIME_TYPES:
+        return [{"type": "image", "data": result.data, "mime_type": result.mime_type}]
+    return str(result)

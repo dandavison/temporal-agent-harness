@@ -132,6 +132,12 @@ class StopArgs(_HasState):
     pass
 
 
+class DeleteSnapshotArgs(_HasState):
+    """Arguments for the snapshot-delete activity: deletes ``state.snapshot``."""
+
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Result models (activity -> workflow)
 # ---------------------------------------------------------------------------
@@ -216,3 +222,15 @@ class SessionResult(_HasState):
     """Result of create/resume -- session state + capabilities."""
 
     supports_pty: bool
+    task_queue: str | None = None
+    """The serving worker's own task queue, when its provider has one. Later activities for
+    this session are routed there, so they reach the worker that holds the live session
+    (and its PTY processes)."""
+
+
+class StateResult(_HasState):
+    """Result of a lifecycle operation that can change the session state (start, stop,
+    shutdown), so the workflow's copy stays current -- e.g. ``stop`` records the snapshot
+    fingerprint a later resume checks."""
+
+    pass

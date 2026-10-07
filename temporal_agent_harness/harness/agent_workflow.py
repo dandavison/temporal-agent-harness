@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     Literal,
@@ -47,7 +48,7 @@ from temporalio.contrib.workflow_streams import (
     WorkflowStreamClient,
     WorkflowTopicHandle,
 )
-from temporalio.exceptions import ApplicationError
+from temporalio.exceptions import ActivityError, ApplicationError
 from temporalio.workflow import ActivityConfig
 
 from temporal_agent_harness.harness.state import StateRef
@@ -119,6 +120,14 @@ from temporal_agent_harness.harness.agent_protocol import (
 # lives in its own leaf module so the sandbox-safe activity contracts in agent_protocol can embed
 # it without a circular import back through this module.
 from temporal_agent_harness.harness.stream_context import TurnStreamContext
+
+# The sandbox package needs the optional ``agents`` dependency, so this core module only names
+# its types for checking and imports it lazily, when an agent is actually given a sandbox.
+if TYPE_CHECKING:
+    from agents.sandbox import SandboxRunConfig
+
+    from temporal_agent_harness.harness.sandbox import SandboxConfig, TemporalSandboxSession
+    from temporal_agent_harness.harness.sandbox._lifecycle import SandboxLifecycle
 
 # ParamSpec/return-type vars for the tool decorators. They let each be typed as an
 # identity over the wrapped callable (``Callable[P, Awaitable[R]] -> Callable[P,
@@ -310,7 +319,8 @@ _InjectedT = TypeVar("_InjectedT")
 # call (via ``run_tool(injections=...)``) rather than the model. Such parameters are
 # hidden from the model's tool schema and filled at dispatch. Statically it's just
 # ``Foo`` (``Annotated`` metadata is invisible to type checkers and to pydantic), so the
-# tool body sees the unwrapped type.
+# tool body sees the unwrapped type. ``Injected[SandboxSession]`` (any OpenAI sandbox
+# session type) is the one injection the harness fills itself, from the agent's sandbox.
 Injected = Annotated[_InjectedT, _INJECTED]
 
 
@@ -361,6 +371,39 @@ def _injected_param_names(fn: Callable[..., Any]) -> tuple[str, ...]:
         for name, hint in hints.items()
         if name != "return" and _INJECTED in getattr(hint, "__metadata__", ())
     )
+
+
+def _is_sandbox_session_type(tp: Any) -> bool:
+    """Whether ``tp`` is an OpenAI sandbox session class (``SandboxSession`` or any other
+    ``BaseSandboxSession``). Matched by name so this module never imports ``agents``."""
+    return isinstance(tp, type) and any(
+        c.__name__ == "BaseSandboxSession"
+        and c.__module__ == "agents.sandbox.session.base_sandbox_session"
+        for c in tp.__mro__
+    )
+
+
+def _sandbox_session_param(fn: Callable[..., Any], inject_names: tuple[str, ...]) -> str | None:
+    """The name of ``fn``'s ``Injected[SandboxSession]`` parameter, if it has one.
+
+    It is an ordinary injected parameter (hidden from the model like any other), except that
+    the harness fills it from the agent's sandbox instead of the caller's ``injections``.
+    """
+    if not inject_names:
+        return None
+    try:
+        hints = get_type_hints(fn, include_extras=True)
+    except Exception:
+        hints = getattr(fn, "__annotations__", {})
+    names = [
+        n for n in inject_names if _is_sandbox_session_type((get_args(hints.get(n)) or (None,))[0])
+    ]
+    if len(names) > 1:
+        raise TypeError(
+            f"tool {getattr(fn, '__name__', fn)!r} declares {len(names)} Injected sandbox "
+            f"session parameters ({', '.join(names)}); an agent has one sandbox, so declare one."
+        )
+    return names[0] if names else None
 
 
 # ---------------------------------------------------------------------------
@@ -1242,6 +1285,18 @@ def defn(
 # ---------------------------------------------------------------------------
 
 
+class SandboxToolContext(BaseModel):
+    """Which sandbox session an ``Injected[SandboxSession]`` tool runs against: the worker's
+    ``SandboxClientProvider`` name and the session state to resume it from.
+
+    The state travels as JSON so this core type does not depend on ``agents``; the worker
+    parses it back into its ``SandboxSessionState`` subclass.
+    """
+
+    provider: str
+    state: dict[str, Any]
+
+
 class AgentToolContext(BaseModel):
     """The bundle a tool needs to publish its own lifecycle events from inside its
     activity: which turn to publish against (:attr:`stream_context`) and the id that
@@ -1257,14 +1312,18 @@ class AgentToolContext(BaseModel):
 
     stream_context: TurnStreamContext
     tool_id: str
+    sandbox: SandboxToolContext | None = None
+    """Set only for a tool with an ``Injected[SandboxSession]`` parameter: the session the
+    activity body resumes on the worker and passes in."""
 
     @classmethod
-    def for_current_tool_id(cls) -> AgentToolContext:
+    def for_current_tool_id(cls, *, sandbox: SandboxToolContext | None = None) -> AgentToolContext:
         """Build the context for the in-flight tool call — both fields resolved implicitly.
 
         The tool id (the model's per-call id) and the turn (stream context) are both
         read from the ambient state ``run_tool`` parked for this invocation, so the
         caller threads nothing. Raises if there is no current tool call or active turn.
+        ``sandbox`` is passed by the dispatcher of a tool that takes a sandbox session.
         """
         tool_id = _current_tool_id()
         runner = _CURRENT_RUNNER.get()
@@ -1274,7 +1333,7 @@ class AgentToolContext(BaseModel):
                 "no active agent turn — AgentToolContext.for_current_tool_id() must "
                 "be called while a turn is in flight"
             )
-        return cls(stream_context=stream_context, tool_id=tool_id)
+        return cls(stream_context=stream_context, tool_id=tool_id, sandbox=sandbox)
 
 
 # ---------------------------------------------------------------------------
@@ -1958,6 +2017,7 @@ class AgentWorkflowRunner:
         approval_policy_default: ToolApprovalPolicy,
         auto_approval_criteria_default: AutoApprovalCriteria | None = None,
         auto_mode_evaluator: AutoModeEvaluator | None = None,
+        sandbox: SandboxConfig | None = None,
     ) -> None:
         """Construct the runner inside the agent's ``@agent.init``::
 
@@ -1986,6 +2046,12 @@ class AgentWorkflowRunner:
         discovered from the agent's ``@agent.accepts`` handler methods, which also declare
         their own mid-turn behavior, so there is no agent-level queuing knob. Registers the
         workflow's update/query/signal handlers.
+
+        ``sandbox`` gives the agent one durable sandbox (see
+        :class:`~temporal_agent_harness.harness.sandbox.SandboxConfig`). It is created on first
+        use — :meth:`sandbox`, :meth:`sandbox_run_config`, or a tool with an
+        ``Injected[SandboxSession]`` parameter — idled by its ``IdlePolicy`` between turns,
+        and closed when the run loop ends.
         """
         # The runner is built inside the agent's @agent.init; enforce here that the
         # enclosing workflow honors the standardized agent-input contract (run/__init__
@@ -2062,6 +2128,11 @@ class AgentWorkflowRunner:
         # Strong references to in-flight participant tasks. Held only so a spawned task is not
         # garbage-collected mid-flight; turn accounting lives in the refcount, not here.
         self._participant_tasks: set[asyncio.Future[None]] = set()
+        self._sandbox: SandboxLifecycle | None = None
+        if sandbox is not None:
+            with workflow.unsafe.imports_passed_through():
+                from temporal_agent_harness.harness.sandbox._lifecycle import SandboxLifecycle
+            self._sandbox = SandboxLifecycle(sandbox)
 
         # Register protocol handlers dynamically so the containing workflow doesn't need to.
         workflow.set_update_handler(
@@ -3001,10 +3072,33 @@ class AgentWorkflowRunner:
         On close, the loop waits for in-flight participants to finish before returning, so a
         joined handler's work is never silently discarded.
         """
+        try:
+            await self._run_loop(agent)
+        finally:
+            # Every exit that still runs workflow code, cancellation included. A hard
+            # TERMINATE runs none, so backends should also carry their own timeouts.
+            if self._sandbox is not None:
+                await self._sandbox.close()
+
+    async def _run_loop(self, agent: object) -> None:
+        def has_work() -> bool:
+            return self._status.can_open_turn or bool(self._joining) or self._closed
+
         while not self._closed:
-            await workflow.wait_condition(
-                lambda: self._status.can_open_turn or bool(self._joining) or self._closed
-            )
+            if self._sandbox_idle_timer_armed():
+                assert self._sandbox is not None and self._sandbox.config.idle is not None
+                try:
+                    await workflow.wait_condition(
+                        has_work, timeout=self._sandbox.config.idle.after
+                    )
+                except asyncio.TimeoutError:
+                    await self._sandbox.apply_idle_policy()
+                    continue
+            else:
+                # Also wakes when a turn ends with the sandbox used, to start the idle timer.
+                await workflow.wait_condition(
+                    lambda: has_work() or self._sandbox_idle_timer_armed()
+                )
             if self._closed:
                 break
             # Joins first: they belong to the turn that is already open, and draining them
@@ -3439,6 +3533,73 @@ class AgentWorkflowRunner:
                 context=context,
             )
 
+    # -- Sandbox ------------------------------------------------------------
+
+    async def sandbox(self) -> TemporalSandboxSession:
+        """The agent's sandbox session, created or resumed first if needed.
+
+        Every call on it is an activity, so workflow code can script the sandbox directly::
+
+            sb = await self._runner.sandbox()
+            await sb.exec("git fetch && git checkout -B agent origin/main")
+        """
+        return await self._require_sandbox("runner.sandbox()").ensure_running()
+
+    def sandbox_tools(self) -> list[Callable[..., Awaitable[Any]]]:
+        """The model-facing tools for the sandbox's capabilities (``exec_command``,
+        ``write_stdin``, ``view_image``, ``apply_patch``), as harness activity tools any
+        model SDK can use. Register their activities with ``SANDBOX_TOOL_ACTIVITIES``."""
+        lifecycle = self._require_sandbox("runner.sandbox_tools()")
+        with workflow.unsafe.imports_passed_through():
+            from temporal_agent_harness.harness.sandbox.tools import tools_for
+        return tools_for(lifecycle.config.capabilities)
+
+    def sandbox_instructions(self) -> str:
+        """The sandbox capabilities' own prompt fragments, to append to the system prompt."""
+        lifecycle = self._require_sandbox("runner.sandbox_instructions()")
+        with workflow.unsafe.imports_passed_through():
+            from temporal_agent_harness.harness.sandbox.tools import instructions_for
+        return instructions_for(lifecycle.config.capabilities, lifecycle.config.manifest)
+
+    async def sandbox_run_config(self, **kwargs: Any) -> SandboxRunConfig:
+        """A ``SandboxRunConfig`` that runs an OpenAI ``SandboxAgent`` on this agent's sandbox.
+
+        The session is passed in live, so OpenAI treats it as caller-owned and leaves it
+        running after the run, instead of creating and tearing down a sandbox every turn.
+        Its manifest and capabilities are fixed by the ``SandboxConfig``. ``kwargs`` go to
+        ``SandboxRunConfig`` (e.g. ``cwd``)::
+
+            RunConfig(sandbox=await self._runner.sandbox_run_config())
+        """
+        lifecycle = self._require_sandbox("runner.sandbox_run_config()")
+        with workflow.unsafe.imports_passed_through():
+            from agents.sandbox import SandboxRunConfig
+        session = await lifecycle.ensure_running()
+        return SandboxRunConfig(client=lifecycle.client, session=session, **kwargs)
+
+    def _require_sandbox(self, use: str) -> SandboxLifecycle:
+        if self._sandbox is None:
+            raise ApplicationError(
+                f"{use} needs a sandbox, but this agent has none: pass "
+                "sandbox=SandboxConfig(...) to AgentWorkflowRunner",
+                type="SandboxNotConfigured",
+                non_retryable=True,
+            )
+        return self._sandbox
+
+    async def _tool_sandbox_session(self, tool_name: str) -> TemporalSandboxSession:
+        """The running session for a tool's ``Injected[SandboxSession]`` parameter."""
+        return await self._require_sandbox(
+            f"tool {tool_name!r} takes an Injected[SandboxSession], so it"
+        ).ensure_running()
+
+    def _sandbox_idle_timer_armed(self) -> bool:
+        return (
+            self._sandbox is not None
+            and self._sandbox.idle_timer_armed
+            and not self._status.turn_active
+        )
+
     # -- Tool execution -----------------------------------------------------
 
     async def run_tool(
@@ -3597,7 +3758,8 @@ class _ToolSig:
     the user signature with ``self`` and every ``Injected[...]`` parameter removed.
     ``user_params`` / ``inject_names`` / ``has_self`` are what dispatch needs to rebuild
     the full call (model-supplied values + workflow-injected values) in the activity's
-    own parameter order.
+    own parameter order. ``sandbox_param`` names the one injected parameter (if any) the
+    harness fills with the agent's sandbox session.
     """
 
     user_sig: inspect.Signature
@@ -3607,6 +3769,7 @@ class _ToolSig:
     inject_names: tuple[str, ...]
     has_self: bool
     return_type: Any  # the tool's declared return type, or None if unannotated
+    sandbox_param: str | None
 
 
 def _tool_signatures(user_fn: Callable[..., Any]) -> _ToolSig:
@@ -3636,6 +3799,7 @@ def _tool_signatures(user_fn: Callable[..., Any]) -> _ToolSig:
         inject_names=inject_names,
         has_self=has_self,
         return_type=return_type,
+        sandbox_param=_sandbox_session_param(user_fn, inject_names),
     )
 
 
@@ -3654,6 +3818,20 @@ def _apply_model_facing_views(
     wrapper.__module__ = user_fn.__module__
     wrapper.__signature__ = sig.model_sig
     wrapper.__annotations__ = sig.model_annotations
+
+
+async def _resolve_sandbox_session(tool_name: str, tool_ctx: AgentToolContext) -> Any:
+    """Worker side: the live session for a tool's ``Injected[SandboxSession]`` parameter."""
+    if tool_ctx.sandbox is None:
+        raise ApplicationError(
+            f"tool {tool_name!r} takes an Injected[SandboxSession] but ran without a sandbox "
+            "context",
+            type="SandboxNotConfigured",
+            non_retryable=True,
+        )
+    from temporal_agent_harness.harness.sandbox._provider import resolve_session
+
+    return await resolve_session(tool_ctx.sandbox.provider, tool_ctx.sandbox.state)
 
 
 def activity_tool_defn(
@@ -3717,6 +3895,18 @@ def activity_tool_defn(
         # what the tool actually DOES, not just what it is named.
         tool_description = inspect.getdoc(user_fn)
 
+        # A live sandbox session can't be serialized, so it is not one of the activity's
+        # arguments: the body resumes it from ``tool_ctx.sandbox`` and puts it back in place.
+        activity_params = [p for p in sig.user_params if p.name != sig.sandbox_param]
+        sandbox_index = next(
+            (
+                i
+                for i, p in enumerate(p for p in sig.user_params if p.name != "self")
+                if p.name == sig.sandbox_param
+            ),
+            None,
+        )
+
         # ---- activity body: runs in the worker, publishes lifecycle from within ----
         async def activity_body(*args: Any, **kwargs: Any) -> Any:
             *user_args, tool_ctx = args
@@ -3725,6 +3915,8 @@ def activity_tool_defn(
                     f"agent tool {tool_name!r} ran as an activity without an "
                     f"AgentToolContext trailing argument"
                 )
+            if sandbox_index is not None:
+                user_args.insert(sandbox_index, await _resolve_sandbox_session(tool_name, tool_ctx))
             full_input = _tool_input(sig.user_sig, tuple(user_args), kwargs)
             tool_input = {
                 k: v for k, v in full_input.items() if k not in sig.inject_names and k != "self"
@@ -3759,9 +3951,15 @@ def activity_tool_defn(
         activity_body.__qualname__ = tool_name
         activity_body.__doc__ = user_fn.__doc__
         activity_body.__module__ = user_fn.__module__
-        activity_body.__signature__ = _signature_with_tool_ctx(sig.user_sig)  # type: ignore[attr-defined]
+        activity_body.__signature__ = _signature_with_tool_ctx(  # type: ignore[attr-defined]
+            sig.user_sig.replace(parameters=activity_params)
+        )
         activity_body.__annotations__ = {
-            **getattr(user_fn, "__annotations__", {}),
+            **{
+                k: v
+                for k, v in getattr(user_fn, "__annotations__", {}).items()
+                if k != sig.sandbox_param
+            },
             "tool_ctx": AgentToolContext,
         }
         the_activity = activity.defn(name=tool_name)(activity_body)
@@ -3789,10 +3987,22 @@ def activity_tool_defn(
                 auto_approval_criteria=auto_approval_criteria,
             )
 
+            call_config = config
+            sandbox_ctx: SandboxToolContext | None = None
+            session: TemporalSandboxSession | None = None
+            if sig.sandbox_param is not None:
+                session = await _current_runner()._tool_sandbox_session(tool_name)
+                sandbox_ctx = SandboxToolContext(
+                    provider=session.provider_name, state=session.state.model_dump(mode="json")
+                )
+                call_config = session.pinned_activity_config(config)
+
             injections = _current_tool_injections() if sig.inject_names else {}
             activity_args: list[Any] = []
             for p in sig.user_params:
                 if sig.has_self and p.name == "self":
+                    continue
+                if p.name == sig.sandbox_param:
                     continue
                 if p.name in sig.inject_names:
                     if p.name not in injections:
@@ -3805,16 +4015,21 @@ def activity_tool_defn(
                     activity_args.append(injections[p.name])
                 else:
                     activity_args.append(bound.arguments[p.name])
-            activity_args.append(AgentToolContext.for_current_tool_id())
+            activity_args.append(AgentToolContext.for_current_tool_id(sandbox=sandbox_ctx))
             # Dispatch by activity NAME, so pass result_type explicitly — otherwise a
             # model/dataclass return comes back as a raw dict (Temporal can't infer the
             # type from a name the way it would from a function reference).
-            return await workflow.execute_activity(
-                tool_name,
-                args=activity_args,
-                result_type=sig.return_type,
-                **config,
-            )
+            try:
+                return await workflow.execute_activity(
+                    tool_name,
+                    args=activity_args,
+                    result_type=sig.return_type,
+                    **call_config,
+                )
+            except ActivityError as e:
+                if session is not None and session.unpin_if_worker_lost(e):
+                    raise session.worker_lost_error() from e
+                raise
 
         _apply_model_facing_views(dispatch, user_fn, sig, tool_name)
         dispatch.activity = the_activity  # type: ignore[attr-defined]
@@ -3892,7 +4107,9 @@ def tool_defn(
                 )
             available = _current_tool_injections()
             try:
-                inject_kwargs = {n: available[n] for n in sig.inject_names}
+                inject_kwargs = {
+                    n: available[n] for n in sig.inject_names if n != sig.sandbox_param
+                }
             except KeyError as missing:
                 raise RuntimeError(
                     f"workflow tool {tool_name!r} requires injected argument {missing} "
@@ -3907,6 +4124,9 @@ def tool_defn(
                 tool_description=tool_description,
                 auto_approval_criteria=auto_approval_criteria,
             )
+            if sig.sandbox_param is not None:
+                # The workflow-side session: every call on it is an activity.
+                inject_kwargs[sig.sandbox_param] = await runner._tool_sandbox_session(tool_name)
 
             runner._pub(
                 ctx.turn_id,

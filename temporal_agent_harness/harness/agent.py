@@ -76,6 +76,13 @@
 #
 #     @agent.activity_tool_defn()
 #     async def read_page(store: Injected[str], page_url: str) -> str: ...
+#
+# ``Injected[SandboxSession]`` is filled by the harness itself, from the agent's sandbox
+# (``AgentWorkflowRunner(sandbox=...)``), with no ``injections`` entry needed. An activity
+# tool gets the real session, resumed on the worker::
+#
+#     @agent.activity_tool_defn()
+#     async def run_tests(session: Injected[SandboxSession], pattern: str) -> str: ...
 
 from temporal_agent_harness.harness.agent_protocol import (
     AutoApprovalCriteria,

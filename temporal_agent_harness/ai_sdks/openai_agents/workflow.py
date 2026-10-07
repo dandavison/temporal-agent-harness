@@ -22,7 +22,7 @@ from agents.tool import (
 from temporalio import activity
 from temporalio import workflow as temporal_workflow
 from temporalio.common import Priority, RetryPolicy
-from temporal_agent_harness.ai_sdks.openai_agents.sandbox._temporal_sandbox_client import (
+from temporal_agent_harness.harness.sandbox._client import (
     TemporalSandboxClient,
 )
 from temporalio.exceptions import ApplicationError, TemporalError

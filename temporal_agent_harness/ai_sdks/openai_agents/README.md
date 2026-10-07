@@ -576,6 +576,22 @@ result = await Runner.run(
 )
 ```
 
+### One Sandbox Across Turns (Harness Agents)
+
+Without a live session, each `Runner.run` owns its sandbox and tears it down at the end, so the next turn rebuilds
+it. A harness agent can instead give its `AgentWorkflowRunner` a `sandbox=SandboxConfig(...)` (see
+`temporal_agent_harness.harness.sandbox`) and run every turn on that one durable sandbox, which the runner creates
+lazily, idles between turns, and closes when the agent ends:
+
+```python
+result = await Runner.run(
+    agent, prompt, run_config=RunConfig(sandbox=await self._runner.sandbox_run_config())
+)
+```
+
+The same sandbox is available to the agent's other tools through an `Injected[SandboxSession]` parameter. The
+design is in `docs/design/agent-sandboxes.md`.
+
 ## Streaming
 
 ⚠️ **Experimental** - This functionality is subject to change prior to General Availability.

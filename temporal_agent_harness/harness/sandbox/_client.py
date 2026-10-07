@@ -16,13 +16,14 @@ from agents.sandbox.snapshot import SnapshotBase, SnapshotSpec, SnapshotSpecUnio
 from pydantic.type_adapter import TypeAdapter
 
 from temporalio import workflow
-from temporal_agent_harness.ai_sdks.openai_agents.sandbox._temporal_activity_models import (
+from temporal_agent_harness.harness.sandbox._activity_models import (
     CreateSessionArgs,
     ResumeSessionArgs,
     SessionResult,
     StopArgs,
 )
-from temporal_agent_harness.ai_sdks.openai_agents.sandbox._temporal_sandbox_session import (
+from temporal_agent_harness.harness.sandbox._session import (
+    DEFAULT_AFFINITY_TIMEOUT,
     TemporalSandboxSession,
 )
 from temporalio.workflow import ActivityConfig
@@ -52,9 +53,12 @@ class TemporalSandboxClient(BaseSandboxClient[BaseSandboxClientOptions]):
         self,
         name: str,
         config: ActivityConfig | None = None,
+        *,
+        affinity_timeout: timedelta = DEFAULT_AFFINITY_TIMEOUT,
     ) -> None:
         """Initialize the client."""
         self._name = name
+        self._affinity_timeout = affinity_timeout
         self._config: ActivityConfig = config or ActivityConfig(
             start_to_close_timeout=timedelta(minutes=5),
         )
@@ -68,6 +72,29 @@ class TemporalSandboxClient(BaseSandboxClient[BaseSandboxClientOptions]):
         options: BaseSandboxClientOptions,
     ) -> SandboxSession:
         """Create a new sandbox session via activity."""
+        return self._wrap_session(
+            await self.create_session(snapshot=snapshot, manifest=manifest, options=options),
+            # Real instrumentation runs in the activity in the real client session.
+            instrumentation=None,
+        )
+
+    async def resume(self, state: SandboxSessionState) -> SandboxSession:
+        """Resume an existing sandbox session via activity."""
+        return self._wrap_session(
+            await self.resume_session(state),
+            # Real instrumentation runs in the activity in the real client session.
+            instrumentation=None,
+        )
+
+    async def create_session(
+        self,
+        *,
+        snapshot: SnapshotSpec | SnapshotBase | None = None,
+        manifest: Manifest | None = None,
+        options: BaseSandboxClientOptions | None,
+    ) -> TemporalSandboxSession:
+        """:meth:`create`, returning the activity-backed session without the instrumented
+        ``SandboxSession`` wrapper (whose bookkeeping is not workflow-deterministic)."""
         result: SessionResult = await workflow.execute_activity(
             f"{self._name}-sandbox_client_create",
             arg=CreateSessionArgs(
@@ -80,42 +107,40 @@ class TemporalSandboxClient(BaseSandboxClient[BaseSandboxClientOptions]):
             result_type=SessionResult,
             **self._config,
         )
-        return self._wrap_session(
-            TemporalSandboxSession(
-                name=self._name,
-                config=self._config,
-                state=result.state,
-                supports_pty_flag=result.supports_pty,
-            ),
-            # Real instrumentation runs in the activity in the real client session.
-            instrumentation=None,
-        )
+        return self._session_from(result)
 
-    async def resume(self, state: SandboxSessionState) -> SandboxSession:
-        """Resume an existing sandbox session via activity."""
+    async def resume_session(self, state: SandboxSessionState) -> TemporalSandboxSession:
+        """:meth:`resume`, returning the activity-backed session unwrapped."""
         result: SessionResult = await workflow.execute_activity(
             f"{self._name}-sandbox_client_resume",
             arg=ResumeSessionArgs(state=state),
             result_type=SessionResult,
             **self._config,
         )
-        return self._wrap_session(
-            TemporalSandboxSession(
-                name=self._name,
-                config=self._config,
-                state=result.state,
-                supports_pty_flag=result.supports_pty,
-            ),
-            # Real instrumentation runs in the activity in the real client session.
-            instrumentation=None,
+        return self._session_from(result)
+
+    def _session_from(self, result: SessionResult) -> TemporalSandboxSession:
+        return TemporalSandboxSession(
+            name=self._name,
+            config=self._config,
+            state=result.state,
+            supports_pty_flag=result.supports_pty,
+            task_queue=result.task_queue,
+            affinity_timeout=self._affinity_timeout,
         )
 
     async def delete(self, session: TemporalSandboxSession) -> TemporalSandboxSession:  # type: ignore[override]
         """Delete a sandbox session via activity."""
+        inner = getattr(session, "_inner", session)
+        config = (
+            inner.pinned_activity_config(self._config)
+            if isinstance(inner, TemporalSandboxSession)
+            else self._config
+        )
         await workflow.execute_activity(
             f"{self._name}-sandbox_client_delete",
             arg=StopArgs(state=session.state),
-            **self._config,
+            **config,
         )
         return session
 

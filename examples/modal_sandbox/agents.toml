@@ -1,0 +1,15 @@
+# Registry of agents the Modal sandbox example UI can launch. See examples/openai_hello/agents.toml
+# for how the packaged server uses this file.
+
+[[agents]]
+key = "modal-coding"
+workflow_type = "ModalCodingAgent"
+agent = "examples.modal_sandbox.workflow:ModalCodingAgentWorkflow"
+task_queue = "modal-sandbox"
+label = "Modal Coding Agent"
+description = """
+A Gemini coding agent with its own durable Modal sandbox and the full sandbox tool suite:
+exec_command and write_stdin (commands on a PTY, including servers and long jobs it leaves
+running and checks back on, across turns), apply_patch to edit files, and view_image to look at
+images it produces. The sandbox is saved and shut down after 10 idle minutes and restored on the
+next message."""

@@ -13,7 +13,7 @@ from temporal_agent_harness.ai_sdks.openai_agents._temporal_openai_agents import
     OpenAIAgentsPlugin,
     OpenAIPayloadConverter,
 )
-from temporal_agent_harness.ai_sdks.openai_agents.sandbox._sandbox_client_provider import (
+from temporal_agent_harness.harness.sandbox._provider import (
     SandboxClientProvider,
 )
 from temporal_agent_harness.ai_sdks.openai_agents.workflow import AgentsWorkflowError
