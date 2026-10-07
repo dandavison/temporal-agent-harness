@@ -1,7 +1,7 @@
 """Chat with an agent whose turns run as local child workflows, and watch them in the Temporal UI.
 
-The agent workflow runs on the server. Each turn runs in this process, against an in-process local
-server that syncs the turn's history to the server. See README.md.
+The agent workflow runs on the server. Each turn runs in this process, on a worker with local
+execution, which syncs the turn's history to the server. See README.md.
 
     uv run --group examples python -m examples.local_turns_agent.demo
 """
@@ -16,9 +16,8 @@ import uuid
 from datetime import timedelta
 
 from temporalio.client import Client
-from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
-from temporalio.worker import Worker
+from temporalio.worker import LocalExecution, Worker
 
 from temporal_agent_harness.ai_sdks.openai_agents import (
     ModelActivityParameters,
@@ -33,9 +32,8 @@ from temporal_agent_harness.harness.agent_protocol import (
     AgentMessage,
     AgentMessageReply,
 )
-from temporal_agent_harness.local_turns import LocalTurns
 
-from .workflow import LocalTurnsAgentWorkflow, WeatherTurn, get_weather
+from .workflow import TURN_TASK_QUEUE, LocalTurnsAgentWorkflow, WeatherTurn, get_weather
 
 TASK_QUEUE = "local-turns-agent"
 
@@ -45,25 +43,22 @@ async def main() -> None:
     parser.add_argument("--address", default="localhost:7233")
     parser.add_argument("--ui", default="http://localhost:8233")
     args = parser.parse_args()
-    module = os.environ.get("TEMPORAL_LOCAL_SERVER_MODULE")
-    if not module:
-        sys.exit("error: TEMPORAL_LOCAL_SERVER_MODULE env var not set")
     if not os.environ.get("OPENAI_API_KEY"):
         sys.exit("error: OPENAI_API_KEY env var not set")
 
-    client = await Client.connect(args.address, data_converter=pydantic_data_converter)
     plugin = OpenAIAgentsPlugin(
         model_params=ModelActivityParameters(
             start_to_close_timeout=timedelta(seconds=60)
         )
     )
+    client = await Client.connect(args.address, plugins=[plugin])
     async with (
-        LocalTurns(
-            module,
-            args.address,
+        Worker(
+            client,
+            task_queue=TURN_TASK_QUEUE,
             workflows=[WeatherTurn],
             activities=[get_weather],
-            plugins=[plugin],
+            local_execution=LocalExecution(),
         ),
         Worker(client, task_queue=TASK_QUEUE, workflows=[LocalTurnsAgentWorkflow]),
     ):

@@ -1,10 +1,10 @@
-"""A weather agent whose turns run as local child workflows.
+"""A weather agent whose turns run locally as child workflows.
 
 The agent workflow runs on the server and keeps the conversation; the harness runner admits
-messages and publishes turn events as usual. Each turn is a child workflow, ``WeatherTurn``, that
-the server owns and a worker process running ``LocalTurns`` runs: the OpenAI Agents SDK loop, with
-its model and tool calls as activities of the turn. The server shows the turn's history as the
-worker syncs it.
+messages and publishes turn events as usual. Each turn is a child workflow, ``WeatherTurn``, on
+the task queue ``TURN_TASK_QUEUE``, whose worker has local execution: the OpenAI Agents SDK loop,
+with its model and tool calls as activities of the turn, runs in that worker's process, and the
+server shows the turn's history as the worker syncs it.
 
 Compared with running the loop in the agent workflow, a turn loses the harness's tool approvals,
 callback tools, tool events and streamed reply deltas: those go through the agent workflow, which
@@ -33,9 +33,9 @@ with workflow.unsafe.imports_passed_through():
         ToolApprovalPolicy,
     )
     from temporal_agent_harness.harness.agent_workflow import AgentWorkflowRunner
-    from temporal_agent_harness.local_turns import run_local_turn
 
 MODEL = "gpt-5.6-luna"
+TURN_TASK_QUEUE = "local-turns"
 
 
 @activity.defn
@@ -58,7 +58,7 @@ class TurnOutput(BaseModel):
 
 @workflow.defn
 class WeatherTurn:
-    """One turn, run as a local child workflow."""
+    """One turn, run locally as a child workflow."""
 
     @workflow.run
     async def run(self, turn: TurnInput) -> TurnOutput:
@@ -95,10 +95,11 @@ class LocalTurnsAgentWorkflow:
     @agent.accepts
     async def ask(self, message: TextMessage) -> TextReply:
         """Ask about the weather."""
-        output = await run_local_turn(
-            "WeatherTurn",
+        output = await workflow.execute_child_workflow(
+            WeatherTurn.run,
             TurnInput(conversation=self._conversation, text=message.text),
-            result_type=TurnOutput,
+            id=f"{workflow.info().workflow_id}-turn-{workflow.uuid4()}",
+            task_queue=TURN_TASK_QUEUE,
         )
         self._conversation = output.conversation
         return TextReply(text=output.reply)

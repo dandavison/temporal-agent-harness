@@ -111,6 +111,7 @@ nexus-mcp = [
 # Everything needed to RUN the bundled Monty example from a checkout. Not part of the
 # published package's runtime deps — examples are not shipped.
 examples = [
+    "temporalio-localserver",  # the module for LocalExecution (examples/local_turns_agent)
     "google-genai>=2.0.0",
     "google-auth>=2.53.0",
     "pydantic-monty==1.0.0",  # Monty sandbox; pinned like the code-mode extra
@@ -125,6 +126,7 @@ examples = [
 # so dev includes it. uv installs the `dev` group by default, so a plain `uv run pytest`
 # has everything the whole suite under tests/ needs.
 dev = [
+    "temporalio-localserver",  # the module for LocalExecution (tests/local_turns)
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
     # The state layer's property test (tests/state/test_property.py) generates random draft
@@ -165,9 +167,10 @@ include = ["temporal_agent_harness*"]
 
 [tool.uv.sources]
 temporal-nexus-mcp = { path = "nexus/mcp", editable = true }
-# The local-workflow prototype needs sdk-python's local_server_module connect option, which exists
-# only on the local-workflow-progress branch.
+# The local-execution prototype needs sdk-python's LocalExecution worker option and its
+# temporalio-localserver package, which exist only on sdk-python's local-chasm branch.
 temporalio = { path = "../../../sdk-python/local-workflow-progress/sdk-python", editable = true }
+temporalio-localserver = { path = "../../../sdk-python/local-workflow-progress/sdk-python/temporalio-localserver", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
