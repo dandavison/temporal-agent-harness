@@ -1,13 +1,14 @@
-"""A weather agent whose turns run as local workflows.
+"""A weather agent whose turns run as local child workflows.
 
 The agent workflow runs on the server and keeps the conversation; the harness runner admits
-messages and publishes turn events as usual. Each turn is one server activity,
-``LocalTurns.run_turn``, which runs ``WeatherTurn`` as a local workflow in the worker process: the
-OpenAI Agents SDK loop, with its model and tool calls as activities of the local workflow.
+messages and publishes turn events as usual. Each turn is a child workflow, ``WeatherTurn``, that
+the server owns and a worker process running ``LocalTurns`` runs: the OpenAI Agents SDK loop, with
+its model and tool calls as activities of the turn. The server shows the turn's history as the
+worker syncs it.
 
 Compared with running the loop in the agent workflow, a turn loses the harness's tool approvals,
 callback tools, tool events and streamed reply deltas: those go through the agent workflow, which
-the local workflow cannot reach.
+the turn cannot reach.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ with workflow.unsafe.imports_passed_through():
         ToolApprovalPolicy,
     )
     from temporal_agent_harness.harness.agent_workflow import AgentWorkflowRunner
-    from temporal_agent_harness.local_turns import LocalTurn, LocalTurns
+    from temporal_agent_harness.local_turns import run_local_turn
 
 MODEL = "gpt-5.6-luna"
 
@@ -54,7 +55,7 @@ class TurnOutput(BaseModel):
 
 @workflow.defn
 class WeatherTurn:
-    """One turn, run as a local workflow."""
+    """One turn, run as a local child workflow."""
 
     @workflow.run
     async def run(self, turn: TurnInput) -> TurnOutput:
@@ -91,14 +92,10 @@ class LocalTurnsAgentWorkflow:
     @agent.accepts
     async def ask(self, message: TextMessage) -> TextReply:
         """Ask about the weather."""
-        result = await workflow.execute_activity(
-            LocalTurns.run_turn,
-            LocalTurn(
-                workflow="WeatherTurn",
-                input=TurnInput(conversation=self._conversation, text=message.text),
-            ),
-            start_to_close_timeout=timedelta(minutes=10),
+        output = await run_local_turn(
+            "WeatherTurn",
+            TurnInput(conversation=self._conversation, text=message.text),
+            result_type=TurnOutput,
         )
-        output = TurnOutput.model_validate(result.output)
         self._conversation = output.conversation
         return TextReply(text=output.reply)
