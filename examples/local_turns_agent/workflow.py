@@ -13,6 +13,7 @@ the turn cannot reach.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import Any
 
@@ -40,6 +41,8 @@ MODEL = "gpt-5.6-luna"
 @activity.defn
 async def get_weather(city: str) -> str:
     """Get the weather for a city."""
+    # Slow, so that the turn can be seen running in the Temporal UI.
+    await asyncio.sleep(3)
     return f"sunny in {city}"
 
 
