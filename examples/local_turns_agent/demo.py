@@ -3,7 +3,7 @@
 The agent workflow runs on the server. Each turn runs in this process, on a worker with local
 execution, which syncs the turn's history to the server. See README.md.
 
-    uv run --group examples python -m examples.local_turns_agent.demo
+    uv run --group examples python -m examples.local_turns_agent.demo [--nexus]
 """
 
 from __future__ import annotations
@@ -16,8 +16,11 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
+from temporalio.api.nexus.v1 import EndpointSpec, EndpointTarget
+from temporalio.api.operatorservice.v1 import CreateNexusEndpointRequest
 from temporalio.client import Client
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
+from temporalio.service import RPCError, RPCStatusCode
 from temporalio.worker import LocalExecution, Worker
 
 from temporal_agent_harness.ai_sdks.openai_agents import (
@@ -35,9 +38,13 @@ from temporal_agent_harness.harness.agent_protocol import (
 )
 
 from .workflow import (
+    TURN_ENDPOINT,
+    TURN_HANDLER_TASK_QUEUE,
     TURN_TASK_QUEUE,
     FilesTurn,
     LocalTurnsAgentWorkflow,
+    LocalTurnsNexusAgentWorkflow,
+    TurnService,
     list_files,
     read_file,
 )
@@ -49,6 +56,11 @@ async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--address", default="localhost:7233")
     parser.add_argument("--ui", default="http://localhost:8233")
+    parser.add_argument(
+        "--nexus",
+        action="store_true",
+        help="start each turn through a Nexus operation instead of as a child workflow",
+    )
     args = parser.parse_args()
     if not os.environ.get("OPENAI_API_KEY"):
         sys.exit("error: OPENAI_API_KEY env var not set")
@@ -59,6 +71,10 @@ async def main() -> None:
         )
     )
     client = await Client.connect(args.address, plugins=[plugin])
+    agent_workflow = LocalTurnsAgentWorkflow
+    if args.nexus:
+        agent_workflow = LocalTurnsNexusAgentWorkflow
+        await create_turn_endpoint(client)
     async with (
         Worker(
             client,
@@ -67,10 +83,19 @@ async def main() -> None:
             activities=[list_files, read_file],
             local_execution=LocalExecution(),
         ),
-        Worker(client, task_queue=TASK_QUEUE, workflows=[LocalTurnsAgentWorkflow]),
+        Worker(
+            client,
+            task_queue=TURN_HANDLER_TASK_QUEUE,
+            nexus_service_handlers=[TurnService()],
+        ),
+        Worker(
+            client,
+            task_queue=TASK_QUEUE,
+            workflows=[LocalTurnsAgentWorkflow, LocalTurnsNexusAgentWorkflow],
+        ),
     ):
         agent = await client.start_workflow(
-            LocalTurnsAgentWorkflow.run,
+            agent_workflow.run,
             AgentConfig(),
             id=f"local-turns-demo-{uuid.uuid4().hex[:8]}",
             task_queue=TASK_QUEUE,
@@ -97,6 +122,27 @@ async def main() -> None:
                     break
             turn += 1
         await agent.terminate("demo finished")
+
+
+async def create_turn_endpoint(client: Client) -> None:
+    """Creates the Nexus endpoint for TurnService, unless the server already has it."""
+    try:
+        await client.operator_service.create_nexus_endpoint(
+            CreateNexusEndpointRequest(
+                spec=EndpointSpec(
+                    name=TURN_ENDPOINT,
+                    target=EndpointTarget(
+                        worker=EndpointTarget.Worker(
+                            namespace=client.namespace,
+                            task_queue=TURN_HANDLER_TASK_QUEUE,
+                        )
+                    ),
+                )
+            )
+        )
+    except RPCError as err:
+        if err.status != RPCStatusCode.ALREADY_EXISTS:
+            raise
 
 
 if __name__ == "__main__":

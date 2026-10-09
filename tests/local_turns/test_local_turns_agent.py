@@ -18,9 +18,13 @@ from temporalio.worker import LocalExecution, Worker
 
 with workflow.unsafe.imports_passed_through():
     from examples.local_turns_agent.workflow import (
+        TURN_ENDPOINT,
+        TURN_HANDLER_TASK_QUEUE,
         TURN_TASK_QUEUE,
         FilesTurn,
         LocalTurnsAgentWorkflow,
+        LocalTurnsNexusAgentWorkflow,
+        TurnService,
     )
 
     from temporal_agent_harness.ai_sdks.openai_agents import (
@@ -132,6 +136,76 @@ async def test_agent_turn_runs_as_a_local_child_workflow():
         "read_file",
         "invoke_model_activity",
     ]
+
+
+async def test_agent_turn_runs_as_a_local_workflow_behind_a_nexus_operation():
+    file_may_return.set()
+    model = TestModel.returning_responses(
+        [
+            ResponseBuilders.tool_call('{"file":"README.md"}', "read_file"),
+            ResponseBuilders.output_message("It is a README."),
+        ]
+    )
+    plugin = OpenAIAgentsPlugin(
+        model_params=ModelActivityParameters(
+            start_to_close_timeout=timedelta(seconds=30)
+        ),
+        model_provider=TestModelProvider(model),
+    )
+    env = await start_local_execution_server()
+    try:
+        client = Client(**{**env.client.config(), "plugins": [plugin]})
+        await env.create_nexus_endpoint(TURN_ENDPOINT, TURN_HANDLER_TASK_QUEUE)
+        task_queue = f"tq-{uuid.uuid4()}"
+        async with (
+            # The only worker for the turn's task queue has local execution, so the turn runs
+            # locally; its result reaches the agent through the operation's completion callback.
+            Worker(
+                client,
+                task_queue=TURN_TASK_QUEUE,
+                workflows=[FilesTurn],
+                activities=[gated_read_file],
+                local_execution=LocalExecution(),
+            ),
+            Worker(
+                client,
+                task_queue=TURN_HANDLER_TASK_QUEUE,
+                nexus_service_handlers=[TurnService()],
+            ),
+            Worker(
+                client, task_queue=task_queue, workflows=[LocalTurnsNexusAgentWorkflow]
+            ),
+        ):
+            agent = await client.start_workflow(
+                LocalTurnsNexusAgentWorkflow.run,
+                AgentConfig(),
+                id=f"agent-{uuid.uuid4()}",
+                task_queue=task_queue,
+            )
+            await agent.execute_update(
+                SEND_AGENT_MESSAGE_UPDATE,
+                AgentMessage(
+                    type="ask",
+                    payload={"text": "What is in README.md?"},
+                    expected_turn=1,
+                ),
+                result_type=AgentMessageReply,
+            )
+            events = await turn_events(client, agent.id, AgentEventType.TURN_END)
+            agent_history = (await agent.fetch_history()).to_json_dict()
+    finally:
+        await env.shutdown()
+
+    replies = [
+        e.event.output
+        for e in events
+        if e.event.type == AgentEventType.MESSAGE_HANDLER_END
+    ]
+    assert replies == [{"text": "It is a README."}]
+    assert scheduled_activities(agent_history) == []
+    assert any(
+        "nexusOperationCompletedEventAttributes" in e for e in agent_history["events"]
+    )
 
 
 async def eventually(get: Callable[[], Awaitable[T | None]]) -> T:
