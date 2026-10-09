@@ -1,7 +1,7 @@
 # Agent turns as local child workflows
 
-A weather agent whose agent workflow runs on a Temporal server while each turn runs in the worker
-process. The turn is an ordinary child workflow of the agent workflow, owned by the server. Its
+An agent that answers questions about the files in the directory the demo runs in. Its agent
+workflow runs on a Temporal server while each turn runs in the worker process. The turn is an ordinary child workflow of the agent workflow, owned by the server. Its
 task queue's worker has local execution (`Worker(..., local_execution=LocalExecution())`), so the
 turn's workflow tasks, model calls and tool calls are served by an in-process local server (a wasm
 module built from the Temporal server's code). The local server syncs the turn's history to the
@@ -14,7 +14,7 @@ local server, both on unmerged branches (below).
 
 | File | Role |
 |---|---|
-| `workflow.py` | `LocalTurnsAgentWorkflow`, the agent workflow; `WeatherTurn`, one turn: the OpenAI Agents SDK loop with a `get_weather` tool that takes 3 seconds. |
+| `workflow.py` | `LocalTurnsAgentWorkflow`, the agent workflow; `FilesTurn`, one turn: the OpenAI Agents SDK loop with `list_files` and `read_file` tools, restricted to the directory the demo runs in. |
 | `demo.py` | Runs the agent workflow's worker and the turn worker, which has local execution; starts an agent, and chats with it in the terminal. |
 
 ## Build and run
@@ -49,7 +49,9 @@ OPENAI_API_KEY=... uv run --group examples python -m examples.local_turns_agent.
 ```
 
 The demo prints the agent workflow's URL in the Temporal UI (http://localhost:8233). Ask, for
-example, "What's the weather in Boston?". The agent's model is `MODEL` in `workflow.py`.
+example, "What does this repo do?" or "Which examples are there, and what do they do?"; a turn
+that reads several files shows many quick tool calls. The agent's model is `MODEL` in
+`workflow.py`.
 
 The first run compiles the module, which takes about 2 seconds and 1.8 GB of memory on an M-series
 Mac; the compiled code is cached, and later runs load it in about 0.2 seconds.
@@ -57,9 +59,10 @@ Mac; the compiled code is cached, and later runs load it in about 0.2 seconds.
 ## What to look at in the UI
 
 - The agent workflow (`LocalTurnsAgent`) has no activities. Each turn is a child workflow
-  (`WeatherTurn`), linked from the agent workflow's history.
-- Open the turn while `get_weather` is running (it takes 3 seconds): the turn is Running, and its
-  history shows the model call and the scheduled tool call. The rest appears when the turn ends.
+  (`FilesTurn`), linked from the agent workflow's history.
+- Open the turn while it runs (each model call takes a few seconds): the turn is Running, and its
+  history shows its model and tool calls up to the last sync, once a second. The rest appears when
+  the turn ends.
 - The turn's history has the usual workflow task and activity events, written by the local server
   and accepted by the server as the turn's history.
 

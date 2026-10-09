@@ -19,8 +19,8 @@ from temporalio.worker import LocalExecution, Worker
 with workflow.unsafe.imports_passed_through():
     from examples.local_turns_agent.workflow import (
         TURN_TASK_QUEUE,
+        FilesTurn,
         LocalTurnsAgentWorkflow,
-        WeatherTurn,
     )
 
     from temporal_agent_harness.ai_sdks.openai_agents import (
@@ -47,21 +47,21 @@ with workflow.unsafe.imports_passed_through():
 
 T = TypeVar("T")
 
-weather_may_return = asyncio.Event()
+file_may_return = asyncio.Event()
 
 
-@activity.defn(name="get_weather")
-async def gated_get_weather(city: str) -> str:
-    await weather_may_return.wait()
-    return f"sunny in {city}"
+@activity.defn(name="read_file")
+async def gated_read_file(file: str) -> str:
+    await file_may_return.wait()
+    return f"the contents of {file}"
 
 
 async def test_agent_turn_runs_as_a_local_child_workflow():
-    weather_may_return.clear()
+    file_may_return.clear()
     model = TestModel.returning_responses(
         [
-            ResponseBuilders.tool_call('{"city":"Boston"}', "get_weather"),
-            ResponseBuilders.output_message("It is sunny in Boston."),
+            ResponseBuilders.tool_call('{"file":"README.md"}', "read_file"),
+            ResponseBuilders.output_message("It is a README."),
         ]
     )
     plugin = OpenAIAgentsPlugin(
@@ -79,8 +79,8 @@ async def test_agent_turn_runs_as_a_local_child_workflow():
             Worker(
                 client,
                 task_queue=TURN_TASK_QUEUE,
-                workflows=[WeatherTurn],
-                activities=[gated_get_weather],
+                workflows=[FilesTurn],
+                activities=[gated_read_file],
                 local_execution=LocalExecution(),
             ),
             Worker(client, task_queue=task_queue, workflows=[LocalTurnsAgentWorkflow]),
@@ -96,7 +96,7 @@ async def test_agent_turn_runs_as_a_local_child_workflow():
                     SEND_AGENT_MESSAGE_UPDATE,
                     AgentMessage(
                         type="ask",
-                        payload={"text": "What is the weather in Boston?"},
+                        payload={"text": "What is in README.md?"},
                         expected_turn=1,
                     ),
                     result_type=AgentMessageReply,
@@ -112,7 +112,7 @@ async def test_agent_turn_runs_as_a_local_child_workflow():
             events = await turn_events(client, agent.id, AgentEventType.TURN_STARTED)
             assert events[-1].event.type == AgentEventType.TURN_STARTED
 
-            weather_may_return.set()
+            file_may_return.set()
             await reply
             events = await turn_events(client, agent.id, AgentEventType.TURN_END)
             agent_history = (await agent.fetch_history()).to_json_dict()
@@ -125,11 +125,11 @@ async def test_agent_turn_runs_as_a_local_child_workflow():
         for e in events
         if e.event.type == AgentEventType.MESSAGE_HANDLER_END
     ]
-    assert replies == [{"text": "It is sunny in Boston."}]
+    assert replies == [{"text": "It is a README."}]
     assert scheduled_activities(agent_history) == []
     assert scheduled_activities(turn_history) == [
         "invoke_model_activity",
-        "get_weather",
+        "read_file",
         "invoke_model_activity",
     ]
 

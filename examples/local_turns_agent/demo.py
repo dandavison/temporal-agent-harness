@@ -14,6 +14,7 @@ import os
 import sys
 import uuid
 from datetime import timedelta
+from pathlib import Path
 
 from temporalio.client import Client
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
@@ -33,7 +34,13 @@ from temporal_agent_harness.harness.agent_protocol import (
     AgentMessageReply,
 )
 
-from .workflow import TURN_TASK_QUEUE, LocalTurnsAgentWorkflow, WeatherTurn, get_weather
+from .workflow import (
+    TURN_TASK_QUEUE,
+    FilesTurn,
+    LocalTurnsAgentWorkflow,
+    list_files,
+    read_file,
+)
 
 TASK_QUEUE = "local-turns-agent"
 
@@ -56,8 +63,8 @@ async def main() -> None:
         Worker(
             client,
             task_queue=TURN_TASK_QUEUE,
-            workflows=[WeatherTurn],
-            activities=[get_weather],
+            workflows=[FilesTurn],
+            activities=[list_files, read_file],
             local_execution=LocalExecution(),
         ),
         Worker(client, task_queue=TASK_QUEUE, workflows=[LocalTurnsAgentWorkflow]),
@@ -69,7 +76,7 @@ async def main() -> None:
             task_queue=TASK_QUEUE,
         )
         print(f"Agent workflow: {args.ui}/namespaces/default/workflows/{agent.id}")
-        print("Ask about the weather; an empty line quits.")
+        print(f"Ask about the files in {Path.cwd()}; an empty line quits.")
         stream = WorkflowStreamClient.create(client, agent.id)
         offset = 0
         turn = 1

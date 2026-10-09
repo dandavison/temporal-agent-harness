@@ -1,7 +1,8 @@
-"""A weather agent whose turns run locally as child workflows.
+"""An agent that answers questions about the files in the directory it runs in, whose turns run
+locally as child workflows.
 
 The agent workflow runs on the server and keeps the conversation; the harness runner admits
-messages and publishes turn events as usual. Each turn is a child workflow, ``WeatherTurn``, on
+messages and publishes turn events as usual. Each turn is a child workflow, ``FilesTurn``, on
 the task queue ``TURN_TASK_QUEUE``, whose worker has local execution: the OpenAI Agents SDK loop,
 with its model and tool calls as activities of the turn, runs in that worker's process, and the
 server shows the turn's history as the worker syncs it.
@@ -13,8 +14,8 @@ the turn cannot reach.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from temporalio import activity, workflow
@@ -36,14 +37,39 @@ with workflow.unsafe.imports_passed_through():
 
 MODEL = "gpt-5.6-luna"
 TURN_TASK_QUEUE = "local-turns"
+MAX_FILE_CHARS = 20_000
 
 
 @activity.defn
-async def get_weather(city: str) -> str:
-    """Get the weather for a city."""
-    # Slow, so that the turn can be seen running in the Temporal UI.
-    await asyncio.sleep(3)
-    return f"sunny in {city}"
+async def list_files(directory: str) -> list[str]:
+    """List the files and directories in a directory, given relative to the project root ("."
+    is the root). Directory names end with "/"."""
+    path = _project_path(directory)
+    if path is None or not path.is_dir():
+        return [f"error: {directory} is not a directory in the project"]
+    return sorted(
+        f"{p.name}/" if p.is_dir() else p.name
+        for p in path.iterdir()
+        if not p.name.startswith(".")
+    )
+
+
+@activity.defn
+async def read_file(file: str) -> str:
+    """Read a file, given relative to the project root. Returns at most the first 20,000
+    characters."""
+    path = _project_path(file)
+    if path is None or not path.is_file():
+        return f"error: {file} is not a file in the project"
+    return path.read_text(errors="replace")[:MAX_FILE_CHARS]
+
+
+def _project_path(relative: str) -> Path | None:
+    """The path of ``relative`` within the project root, the worker's working directory, or None
+    if it is outside the root."""
+    root = Path.cwd().resolve()
+    path = (root / relative).resolve()
+    return path if path.is_relative_to(root) else None
 
 
 class TurnInput(BaseModel):
@@ -57,23 +83,25 @@ class TurnOutput(BaseModel):
 
 
 @workflow.defn
-class WeatherTurn:
+class FilesTurn:
     """One turn, run locally as a child workflow."""
 
     @workflow.run
     async def run(self, turn: TurnInput) -> TurnOutput:
-        weather_agent = Agent(
-            name="Weather",
-            instructions="Answer weather questions. Use get_weather.",
+        files_agent = Agent(
+            name="Files",
+            instructions=(
+                "Answer questions about the files in the project. Use list_files and "
+                "read_file to look at them; paths are relative to the project root."
+            ),
             model=MODEL,
             tools=[
-                activity_as_tool(
-                    get_weather, start_to_close_timeout=timedelta(seconds=30)
-                )
+                activity_as_tool(tool, start_to_close_timeout=timedelta(seconds=30))
+                for tool in (list_files, read_file)
             ],
         )
         result = await Runner.run(
-            weather_agent,
+            files_agent,
             input=[*turn.conversation, {"role": "user", "content": turn.text}],
         )
         return TurnOutput(
@@ -94,9 +122,9 @@ class LocalTurnsAgentWorkflow:
 
     @agent.accepts
     async def ask(self, message: TextMessage) -> TextReply:
-        """Ask about the weather."""
+        """Ask about the files in the project."""
         output = await workflow.execute_child_workflow(
-            WeatherTurn.run,
+            FilesTurn.run,
             TurnInput(conversation=self._conversation, text=message.text),
             id=f"{workflow.info().workflow_id}-turn-{workflow.uuid4()}",
             task_queue=TURN_TASK_QUEUE,
