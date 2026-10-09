@@ -101,7 +101,7 @@ async def main() -> None:
             task_queue=TASK_QUEUE,
         )
         print(f"Agent workflow: {args.ui}/namespaces/default/workflows/{agent.id}")
-        print(f"Ask about the files in {Path.cwd()}; an empty line quits.")
+        print(f"{Path.cwd()}")
         stream = WorkflowStreamClient.create(client, agent.id)
         offset = 0
         turn = 1
