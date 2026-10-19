@@ -41,16 +41,16 @@ from typing import (
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from temporalio import activity, workflow
 from temporalio.common import VersioningBehavior
-from temporalio.contrib.workflow_streams import (
-    TopicHandle,
-    WorkflowStream,
-    WorkflowStreamClient,
-    WorkflowTopicHandle,
-)
 from temporalio.exceptions import ApplicationError
+from temporalio.streams import workflow_append
 from temporalio.workflow import ActivityConfig
 
 from temporal_agent_harness.harness.state import StateRef
+from temporal_agent_harness.harness.streams import (
+    BEGINNING,
+    ActivityStreamPublisher,
+    activity_publisher,
+)
 from temporal_agent_harness.harness.state.decl import declared_states, state_ref
 from temporal_agent_harness.harness.state.events import StateEvent, StateSnapshot
 from temporal_agent_harness.harness.agent_protocol import (
@@ -1179,7 +1179,7 @@ def defn(
         class MyAgent:
             @agent.init
             def __init__(self, config: AgentConfig) -> None:
-                self._runner = AgentWorkflowRunner(config, stream=WorkflowStream(), ...)
+                self._runner = AgentWorkflowRunner(config, ...)
 
             @agent.setup       # optional
             async def setup(self) -> None: ...
@@ -1289,16 +1289,16 @@ class TurnEventPublisher:
     don't have to re-thread turn metadata on every publish. Obtain one
     via :meth:`AgentWorkflowRunner.publisher_from_activity` (an async
     context manager that owns the underlying
-    :class:`WorkflowStreamClient` lifecycle so deltas batch and drain
-    correctly).
+    :class:`~temporal_agent_harness.harness.streams.ActivityStreamPublisher` lifecycle so deltas
+    batch and drain correctly).
     """
 
     def __init__(
         self,
-        events: TopicHandle[AgentEvent],
+        publisher: ActivityStreamPublisher,
         context: TurnStreamContext,
     ) -> None:
-        self._events = events
+        self._publisher = publisher
         self._context = context
 
     def publish(self, event: AgentStreamItem) -> None:
@@ -1316,7 +1316,7 @@ class TurnEventPublisher:
         context, so an activity streaming a model call attributes its deltas to the right
         message without ever knowing there is such a thing.
         """
-        self._events.publish(
+        self._publisher.publish(
             AgentEvent(
                 event=event,
                 agent_id=self._context.agent_id,
@@ -1324,7 +1324,8 @@ class TurnEventPublisher:
                 turn_number=self._context.turn_number,
                 message_id=self._context.message_id,
                 timestamp=time.time(),
-            )
+            ),
+            topic=TURN_EVENTS_TOPIC,
         )
 
 
@@ -1463,7 +1464,7 @@ class _SubagentInstance:
     handle: str
     workflow_id: str
     agent_key: str
-    last_consumed_offset: int = 0
+    last_consumed_offset: str = BEGINNING
     # FIFO gate: tickets handed out in call order; the holder whose ticket == _serving runs.
     _next_ticket: int = 0
     _serving: int = 0
@@ -1954,7 +1955,6 @@ class AgentWorkflowRunner:
         self,
         config: AgentConfig,
         *,
-        stream: WorkflowStream,
         approval_policy_default: ToolApprovalPolicy,
         auto_approval_criteria_default: AutoApprovalCriteria | None = None,
         auto_mode_evaluator: AutoModeEvaluator | None = None,
@@ -1963,7 +1963,6 @@ class AgentWorkflowRunner:
 
             self._runner = AgentWorkflowRunner(
                 config,
-                stream=WorkflowStream(),
                 approval_policy_default=ToolApprovalPolicy.allow_inherently_safe(),
             )
 
@@ -2018,13 +2017,6 @@ class AgentWorkflowRunner:
         # generates its own. workflow.uuid4 is deterministic in-workflow (offline unit tests patch
         # it). Distinct from the full workflow_id, which the model/UI never needs to reproduce.
         self._agent_id: str = config.agent_id or workflow.uuid4().hex[:AGENT_ID_LENGTH]
-        # Retain the WorkflowStream itself (not just the topic handle) so the runner can read
-        # the stream's current head offset in-workflow — see ``_handle_send_agent_message``,
-        # which returns it as ``AgentMessageReply.accepted_offset`` for the client stream-merge.
-        self._stream = stream
-        self._events: WorkflowTopicHandle[AgentEvent] = stream.topic(
-            TURN_EVENTS_TOPIC, type=AgentEvent
-        )
         _assert_async_auto_mode_evaluator(auto_mode_evaluator)
         _assert_auto_mode_has_an_evaluator(approval_policy, auto_mode_evaluator)
         self._auto_mode_evaluator = auto_mode_evaluator
@@ -2120,25 +2112,16 @@ class AgentWorkflowRunner:
 
         This body is deliberately synchronous (declared ``async`` only because Temporal
         requires it): it contains no ``await`` that yields, so it completes inside a single
-        workflow task. Two invariants ride on that:
-
-          * ``accepted_offset`` is captured before anything for this message is published,
-            guaranteeing ``accepted_offset <= turn_started`` — all the client stream-merge
-            requires, since it discards events up to ``turn_started``.
-          * a join's participant increment cannot race the open turn dropping to zero, so
-            one logical turn can never split into two brackets.
+        workflow task, so a join's participant increment cannot race the open turn dropping to
+        zero, and one logical turn can never split into two brackets.
 
         It does NOT run the handler. Execution is the other half, in :meth:`run` — which is
-        what lets the caller have ``accepted_offset`` (and thus start streaming) while the
-        work is still in flight.
+        what lets the caller start streaming while the work is still in flight.
 
         The message's ``message_id`` is minted HERE, before anything about it is published, so
         the ``message_accepted`` event and every later event of its dispatch share one id — and
         the sender gets that id back on the reply without having to read the stream for it.
         """
-        # Read the real log head (``_on_offset``), not a publish counter: activity-published
-        # events enter the same global log via signals and would be missed by a counter.
-        accepted_offset = self._stream._on_offset()
         handler = self._handlers[message.type]  # validator rejected an unknown type
         message_id = str(workflow.uuid4())
 
@@ -2194,7 +2177,6 @@ class AgentWorkflowRunner:
             turn_id=turn_id,
             message_id=message_id,
             disposition=disposition,
-            accepted_offset=accepted_offset,
         )
 
     def _validate_send_agent_message(self, message: AgentMessage) -> None:
@@ -3400,9 +3382,10 @@ class AgentWorkflowRunner:
 
         Use from within a ``@activity.defn`` that needs to publish
         turn events (e.g. ``reply_delta`` chunks from a streaming model
-        call) to its parent workflow's :class:`WorkflowStream`.
+        call) to its parent workflow's stream.
 
-        Encapsulates the :class:`WorkflowStreamClient` lifecycle (entered
+        Encapsulates the activity attempt's
+        :class:`~temporal_agent_harness.harness.streams.ActivityStreamPublisher` (entered
         for batched flushing, exited so the tail drains before the
         activity returns) and the topic binding. Activities just call
         ``publisher.publish(...)``.
@@ -3413,8 +3396,8 @@ class AgentWorkflowRunner:
                 :attr:`AgentWorkflowRunner.current_stream_context` and
                 forwarded opaquely through activity inputs.
             batch_interval: Background flush cadence on the underlying
-                stream client — each flush is one Signal, so a longer interval
-                trades UI snappiness for fewer workflow-history events. ``None``
+                publisher — each flush is one append, so a longer interval
+                trades UI snappiness for fewer appends. ``None``
                 takes :data:`DEFAULT_PUBLISH_BATCH_INTERVAL` (50ms), which keeps
                 the UI feel snappy. An SDK integration should pass its own
                 configured cadence (e.g. the OpenAI plugin's
@@ -3424,20 +3407,14 @@ class AgentWorkflowRunner:
             A :class:`TurnEventPublisher` bound to the active workflow
             (resolved from the activity context) and the given turn.
         """
-        client = WorkflowStreamClient.from_within_activity(
-            batch_interval=(
-                DEFAULT_PUBLISH_BATCH_INTERVAL if batch_interval is None else batch_interval
-            ),
-        )
-        # ``from_within_activity`` targets the workflow that SCHEDULED this activity (always the
+        # ``activity_publisher`` targets the workflow that SCHEDULED this activity (always the
         # publishing agent), so events land on the right stream. The agent's SHORT id to stamp them
         # with is not derivable from ``activity.info()`` (which only knows the workflow_id), so it
         # rides in on the threaded ``context`` (TurnStreamContext.agent_id).
-        async with client:
-            yield TurnEventPublisher(
-                events=client.topic(TURN_EVENTS_TOPIC, type=AgentEvent),
-                context=context,
-            )
+        async with activity_publisher(
+            DEFAULT_PUBLISH_BATCH_INTERVAL if batch_interval is None else batch_interval
+        ) as publisher:
+            yield TurnEventPublisher(publisher=publisher, context=context)
 
     # -- Tool execution -----------------------------------------------------
 
@@ -3520,7 +3497,7 @@ class AgentWorkflowRunner:
         and an explicit id only where there is no ambient one to read: the admission prologue,
         which publishes ``message_accepted`` for a message that has not started running yet.
         """
-        self._events.publish(
+        workflow_append(
             AgentEvent(
                 event=event,
                 # This agent's own short id — so every event on the stream self-identifies its
@@ -3533,7 +3510,8 @@ class AgentWorkflowRunner:
                     _CURRENT_MESSAGE_ID.get() if isinstance(message_id, _Ambient) else message_id
                 ),
                 timestamp=workflow.time(),
-            )
+            ),
+            topic=TURN_EVENTS_TOPIC,
         )
 
 

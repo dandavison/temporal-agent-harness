@@ -2,7 +2,7 @@
 # model-free parent (CodeModeVfsE2EParentWorkflow) mounts an activity-seeded in-memory /skills,
 # a writable in-memory /workspace and an activity-backed /remote, and runs scripts over them, so
 # seeding, fs_* tool dispatch through run_tool, persistence across scripts, error mapping across
-# the activity boundary, and replay are exercised under a WorkflowEnvironment.
+# the activity boundary, and replay are exercised against a real server.
 #
 # Run with: uv run pytest tests/examples/monty/test_code_mode_vfs_e2e.py -v
 
@@ -14,8 +14,6 @@ from typing import Any
 import pytest_asyncio
 from temporalio.client import Client, WorkflowHandle
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
 from temporal_agent_harness.harness.agent_protocol import (
@@ -27,7 +25,9 @@ from temporal_agent_harness.harness.agent_protocol import (
     AgentMessage,
     AgentMessageReply,
 )
+from temporal_agent_harness.harness.streams import subscribe
 from temporal_agent_harness.plugin import AgentHarnessPlugin
+from tests.utils.stream_env import start_env
 
 from . import _code_mode_vfs_e2e_parent as parent
 from ._code_mode_e2e_parent import add_tool
@@ -36,7 +36,7 @@ from ._code_mode_vfs_e2e_parent import VFS_ACTIVITIES, CodeModeVfsE2EParentWorkf
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter)
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"code-mode-vfs-e2e-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -70,9 +70,8 @@ async def _send(
         result_type=AgentMessageReply,
     )
     events: list[AgentEvent] = []
-    stream = WorkflowStreamClient.create(client, handle.id)
-    async for item in stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC], from_offset=0, result_type=AgentEvent
+    async for item in subscribe(
+        client, handle.id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
     ):
         envelope: AgentEvent = item.data
         if envelope.message_id != accepted.message_id:

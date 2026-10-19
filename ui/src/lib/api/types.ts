@@ -1,8 +1,8 @@
 import type * as Protocol from "../../../../packages/client/src/protocol";
 
 export type UnixEpochSeconds = number;
-export type ResumeOffset = number;
-export type StreamOffset = ResumeOffset;
+/** An opaque root-stream cursor, comparable only for equality. `""` is the stream's beginning. */
+export type ResumeOffset = string;
 
 /**
  * One event's own offset in the log of the agent that published it. With the
@@ -188,7 +188,6 @@ export interface SubmitMessageResponse {
   turn_id: TurnId;
   /** Correlates this message with its own events on the stream — see {@link MessageId}. */
   message_id: MessageId;
-  accepted_offset: StreamOffset;
   disposition: MessageDisposition;
 }
 

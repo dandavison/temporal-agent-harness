@@ -12,7 +12,6 @@ each step without knowing how the flow started it.
 from __future__ import annotations
 
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 
 with workflow.unsafe.imports_passed_through():
     from agents import Agent as OpenAIAgent
@@ -61,7 +60,6 @@ class DagStepAgentWorkflow:
         )
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # Every step tool is simulated, so nothing here needs a person's approval.
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )

@@ -45,7 +45,7 @@
 #
 # DESIGN — client-bound activities: ``SubagentActivities.run_subagent_turn`` must close over
 # the worker's ``Client`` (it talks to CHILD workflows, which
-# ``WorkflowStreamClient.from_within_activity()`` cannot reach). ``SimplePlugin``'s
+# an activity's own stream publisher cannot reach). ``SimplePlugin``'s
 # ``activities`` hook only sees the existing activity list, not the worker config, so this
 # plugin overrides :meth:`AgentHarnessPlugin.configure_worker` to read ``config["client"]``
 # and bind there. That is the reason this is a ``SimplePlugin`` SUBCLASS rather than a
@@ -63,6 +63,8 @@ from temporalio.plugin import SimplePlugin
 from temporalio.worker import WorkerConfig
 
 from temporal_agent_harness.harness.jev_approvals.activity import JEV_APPROVAL_ACTIVITIES
+from temporal_agent_harness.harness import streams
+from temporal_agent_harness.harness.streams import StreamBackendFactory
 from temporal_agent_harness.utils.large_payload import DEFAULT_PAYLOAD_STORAGE
 
 if TYPE_CHECKING:
@@ -166,6 +168,8 @@ class AgentHarnessPlugin(SimplePlugin):
       ``tools``.
     * **Filesystem activities** — the ``vfs.<name>.*`` activities of each
       :class:`~temporal_agent_harness.harness.code_mode.ActivityFileSystem` in ``filesystems``.
+    * **Stream backend** — the worker's ``stream_backend``, which stores the events agents
+      append, unless the worker sets its own.
 
     Args:
         tools: The agent's tools. The activity-backed ones get their durable bodies
@@ -183,6 +187,11 @@ class AgentHarnessPlugin(SimplePlugin):
             vars your deployment uses in your own startup code. Every client, worker, and
             server must end up with the same backend, or a payload offloaded by one is
             unreadable by another. ``None`` disables offloading entirely.
+        stream_backend: Where agents' event streams are stored:
+            :func:`~temporal_agent_harness.harness.streams.native_streams` or
+            :func:`~temporal_agent_harness.harness.streams.redis_streams`. Defaults to
+            :func:`~temporal_agent_harness.harness.streams.stream_backend_from_env`. Every
+            client and worker of a deployment must use the same one.
     """
 
     def __init__(
@@ -193,6 +202,7 @@ class AgentHarnessPlugin(SimplePlugin):
         # Defaulting to the shared local storage rather than to ``None`` keeps ``None`` free
         # to mean the one other thing a caller might want: no offloading at all.
         large_payload_offload: ExternalStorage | None = DEFAULT_PAYLOAD_STORAGE,
+        stream_backend: StreamBackendFactory | None = None,
     ) -> None:
         # Resolved eagerly so a bad `tools` entry surfaces at plugin construction, next to the
         # developer's own call, rather than deep inside Worker() where the traceback points at
@@ -203,10 +213,10 @@ class AgentHarnessPlugin(SimplePlugin):
             *JEV_APPROVAL_ACTIVITIES,
         ]
 
+        self.stream_backend_factory: StreamBackendFactory = stream_backend or streams.stream_backend_from_env()
+
         def data_converter(converter: DataConverter | None) -> DataConverter:
             return _data_converter(converter, offload=large_payload_offload)
-
-
 
         super().__init__(
             name="AgentHarnessPlugin",
@@ -234,6 +244,10 @@ class AgentHarnessPlugin(SimplePlugin):
             config.get("activities"),
             [SubagentActivities(client).run_subagent_turn],
         )
+        if config.get("stream_backend") is None:
+            config["stream_backend"] = streams.bind_stream_backend(
+                client, self.stream_backend_factory
+            )
         return config
 
     def _append_activities(

@@ -59,19 +59,19 @@ async function collect(frames: AsyncIterable<AgentSseFrame>): Promise<AgentSseFr
 const frame = (event: string, data: Record<string, unknown>) =>
   `event: ${event}\ndata: ${JSON.stringify({ type: event, ...data })}\n\n`;
 
-test("attach asks for the session from an offset and yields each frame", async () => {
+test("attach asks for the session from a cursor and yields each frame", async () => {
   const { calls, fetch } = stubFetch(
-    sse(frame("turn_started", { resume_offset: 8 }), frame("turn_end", { resume_offset: 9 }))
+    sse(frame("turn_started", { resume_offset: "AAAAAAAAAAg=" }), frame("turn_end", { resume_offset: "AAAAAAAAAAk=" }))
   );
   const transport = new HttpTransport({ baseUrl: "http://h/api", fetch });
   const signal = new AbortController().signal;
-  const frames = await collect(transport.attach("s/1 ?", 7, signal));
+  const frames = await collect(transport.attach("s/1 ?", "AAAAAAAAAAc=", signal));
 
-  assert.equal(calls[0]!.url, "http://h/api/attach?session_id=s%2F1%20%3F&from_offset=7");
+  assert.equal(calls[0]!.url, "http://h/api/attach?session_id=s%2F1%20%3F&from_offset=AAAAAAAAAAc%3D");
   assert.equal(calls[0]!.signal, signal);
   assert.deepEqual(
     frames.map((f) => [f.event, f.data.resume_offset]),
-    [["turn_started", 8], ["turn_end", 9]]
+    [["turn_started", "AAAAAAAAAAg="], ["turn_end", "AAAAAAAAAAk="]]
   );
 });
 
@@ -104,7 +104,7 @@ test("a response with no body yields nothing", async () => {
 });
 
 test("messages are POSTed as JSON with the transport's own headers merged in", async () => {
-  const reply = { turn_number: 1, turn_id: "t", message_id: "m", accepted_offset: 3, disposition: "opened" };
+  const reply = { turn_number: 1, turn_id: "t", message_id: "m", disposition: "opened" };
   const { calls, fetch } = stubFetch(json(reply));
   const transport = new HttpTransport({ baseUrl: "http://h/api/", fetch, headers: { Authorization: "Bearer x" } });
 
@@ -203,7 +203,7 @@ test("an attach that fails throws before yielding anything", async () => {
   const { fetch } = stubFetch(json({ error: "not_found", message: "no such session" }, 404));
   const transport = new HttpTransport({ fetch });
   await assert.rejects(
-    collect(transport.attach("s1", 0, new AbortController().signal)),
+    collect(transport.attach("s1", "", new AbortController().signal)),
     /no such session/
   );
 });

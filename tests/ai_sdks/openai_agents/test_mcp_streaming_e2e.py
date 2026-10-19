@@ -41,8 +41,6 @@ from openai.types.responses import (
 )
 from openai.types.responses.response import Response
 from temporalio.client import Client
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from temporal_agent_harness.ai_sdks.openai_agents import ModelActivityParameters
@@ -64,6 +62,8 @@ from temporal_agent_harness.harness.agent_protocol import (
     AgentMessage,
     AgentMessageReply,
 )
+from temporal_agent_harness.harness.streams import subscribe
+from tests.utils.stream_env import start_env
 
 from ._mcp_e2e_workflow import (
     CALL_ID,
@@ -242,7 +242,7 @@ async def client_and_queue():
         ],
         observer_factory=harness_observer_factory,
     )
-    env = await WorkflowEnvironment.start_time_skipping(plugins=[plugin])
+    env = await start_env(plugins=[plugin])
     task_queue = f"mcp-streaming-{uuid.uuid4()}"
     # NOTE: the default sandboxed workflow runner, deliberately. See the module docstring.
     async with Worker(
@@ -266,14 +266,10 @@ async def _turn_events(client: Client, task_queue: str) -> list[AgentEvent]:
         AgentMessage(type="ask", payload={"text": "hi"}, expected_turn=1),
         result_type=AgentMessageReply,
     )
-    stream = WorkflowStreamClient.create(client, handle.id)
     events: list[AgentEvent] = []
     async with asyncio.timeout(60):
-        async for item in stream.subscribe(
-            topics=[TURN_EVENTS_TOPIC],
-            from_offset=0,
-            result_type=AgentEvent,
-            poll_cooldown=timedelta(milliseconds=10),
+        async for item in subscribe(
+            client, handle.id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
         ):
             events.append(item.data)
             if item.data.event.type == AgentEventType.TURN_END:

@@ -17,7 +17,7 @@ const base = {
   agent_id: "7f3c1a",
   turn_id: "turn-001",
   turn_number: 1,
-  resume_offset: 0
+  resume_offset: ""
 };
 
 let clock = 1_700_000_000;

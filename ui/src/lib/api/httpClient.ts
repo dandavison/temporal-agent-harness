@@ -164,11 +164,13 @@ export class HttpAgentApi implements AgentApi {
 
   async *attach(
     sessionId: WorkflowId,
-    fromOffset = 0,
+    fromOffset = "",
     signal?: AbortSignal
   ): AsyncIterable<AgentSseFrame> {
     const response = await fetch(
-      apiPath(`attach?session_id=${encodeURIComponent(sessionId)}&from_offset=${fromOffset}`),
+      apiPath(
+        `attach?session_id=${encodeURIComponent(sessionId)}&from_offset=${encodeURIComponent(fromOffset)}`
+      ),
       { signal }
     );
     if (!response.ok) {

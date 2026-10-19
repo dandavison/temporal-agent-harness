@@ -12,7 +12,6 @@ from datetime import timedelta
 
 from pydantic import BaseModel, JsonValue
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 
 with workflow.unsafe.imports_passed_through():
     from examples.code_mode_memory.activities import load_skills
@@ -41,7 +40,6 @@ class CodeModeMemoryE2EParentWorkflow:
     def __init__(self, config: AgentConfig, data: MemoryConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._run_code = agent.code_mode_tool(

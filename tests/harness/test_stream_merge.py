@@ -18,7 +18,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from temporalio.contrib.workflow_streams import WorkflowStreamItem
 
 import temporal_agent_harness.harness.stream_merge.cursor as cursor_mod
 from temporal_agent_harness.harness.agent_protocol import (
@@ -44,6 +43,7 @@ from temporal_agent_harness.harness.stream_merge import (
     select_live,
     select_replay,
 )
+from temporal_agent_harness.harness.streams import StreamItem
 
 # ---------------------------------------------------------------------------
 # Event builders
@@ -82,9 +82,14 @@ def _ms(agent_id: str, parent_turn: int, *, child: str, child_turn: int, from_of
             workflow_id=child,
             handler="f",
             subagent_turn=child_turn,
-            from_offset=from_offset,
+            from_offset=_cursor(from_offset),
         ),
     )
+
+
+def _cursor(offset: int) -> str:
+    """The fake streams' cursor to read from ``offset`` on: the decimal offset, empty for 0."""
+    return str(offset) if offset else ""
 
 
 def _rr(agent_id: str, parent_turn: int, *, child: str, child_turn: int, outcome: str = "ok") -> AgentEvent:
@@ -173,13 +178,9 @@ class _FakeHandle:
         self._drip = drip
 
     def subscribe(
-        self,
-        topics: Any = None,
-        from_offset: int = 0,
-        *,
-        result_type: Any = None,
-        poll_cooldown: Any = None,
-    ) -> AsyncIterator[WorkflowStreamItem[AgentEvent]]:
+        self, *, after: str = "", mark: str | None = None
+    ) -> AsyncIterator[StreamItem[AgentEvent]]:
+        from_offset = int(after or 0)
         events = self._events
         fail_after = self._fail_after
         live_tail = self._live_tail
@@ -187,20 +188,21 @@ class _FakeHandle:
         workflow_id = self._workflow_id
         drip = self._drip
 
-        async def gen() -> AsyncIterator[WorkflowStreamItem[AgentEvent]]:
+        async def gen() -> AsyncIterator[StreamItem[AgentEvent]]:
             # Finite backlog then StopAsyncIteration — unlike the live server stream, which would
             # block tailing. Finite streams make the merge's ordering deterministically testable.
             # The cursor closes this generator (its `aclose`) on unmount/teardown; record that via
             # GeneratorExit so a test can assert the merge released the subscription.
+            reached = mark is None or mark == ""
             try:
                 for n, offset in enumerate(range(from_offset, len(events))):
                     if fail_after is not None and n >= fail_after:
                         raise RuntimeError("simulated stream read error (e.g. update cap)")
                     if drip is not None:
                         await asyncio.sleep(drip)
-                    yield WorkflowStreamItem(
-                        topic=TURN_EVENTS_TOPIC, data=events[offset], offset=offset
-                    )
+                    cursor = str(offset + 1)
+                    reached = reached or cursor == mark
+                    yield StreamItem(data=events[offset], cursor=cursor, reached_mark=reached)
                 if live_tail:
                     # Block forever (until cancelled by aclose) — a live, idle workflow's poll.
                     await asyncio.Event().wait()
@@ -228,7 +230,17 @@ class _FakeStreams:
         self._live_tail_workflows = live_tail_workflows or set()
         self._drip_workflows = drip_workflows or {}
 
-    def create(self, _client: Any, workflow_id: str) -> _FakeHandle:
+    def subscribe(
+        self,
+        _client: Any,
+        workflow_id: str,
+        *,
+        topic: str,
+        result_type: Any,
+        after: str = "",
+        mark: str | None = None,
+    ) -> AsyncIterator[StreamItem[AgentEvent]]:
+        assert topic == TURN_EVENTS_TOPIC
         return _FakeHandle(
             self._streams.get(workflow_id, []),
             closes=self._closes,
@@ -236,7 +248,7 @@ class _FakeStreams:
             fail_after=self._fail_workflows.get(workflow_id),
             live_tail=workflow_id in self._live_tail_workflows,
             drip=self._drip_workflows.get(workflow_id),
-        )
+        ).subscribe(after=after, mark=mark)
 
 
 async def _never_stop(_cursor: Any, _ev: AgentEvent) -> bool:
@@ -276,11 +288,11 @@ async def _run_merge(
         drip_workflows=drip_workflows,
     )
     out: list[AgentEvent] = []
-    with patch.object(cursor_mod, "WorkflowStreamClient", fake):
+    with patch.object(cursor_mod, "subscribe", fake.subscribe):
         async for ev, resume_offset in merge_stream(
             client=None,
             root_workflow_id=root,
-            root_from_offset=root_from_offset,
+            root_from_offset=_cursor(root_from_offset),
             skip_until_turn_id=skip_until_turn_id,
             select=select,
             should_stop=should_stop or _never_stop,
@@ -288,7 +300,7 @@ async def _run_merge(
         ):
             out.append(ev)
             if resume_offsets is not None:
-                resume_offsets.append(resume_offset)
+                resume_offsets.append(int(resume_offset or 0))
     return out
 
 
@@ -357,7 +369,7 @@ def test_open_gate_holds_child_until_message_sent_emitted():
     )
     # _ms stamps subagent_id = child[:6] ("C"); the mount carries it so a later give-up can label
     # the child even if it delivered no events of its own.
-    assert mount == MountChild(workflow_id="C", from_offset=7, subagent_id="C")
+    assert mount == MountChild(workflow_id="C", from_offset="7", subagent_id="C")
     assert gates.ready(is_child=True, source_workflow_id="C", ev=child_ts)
 
 

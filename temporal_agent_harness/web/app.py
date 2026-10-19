@@ -296,7 +296,7 @@ def create_agent_harness_app(
         return JSONResponse(content=[fn.model_dump(mode="json") for fn in functions])
 
     @app.get("/api/attach")
-    async def attach(session_id: str, from_offset: int = 0) -> StreamingResponse:
+    async def attach(session_id: str, from_offset: str = "") -> StreamingResponse:
         client = AgentClient(temporal=app.state.temporal, workflow_id=session_id)
         return StreamingResponse(
             await client.attach(on_item=_yield_item, from_offset=from_offset),
@@ -350,7 +350,7 @@ def create_agent_harness_app(
 
     @app.post("/api/chat")
     async def chat(req: ChatRequestBody):
-        def on_item(item: AgentStreamOutput, resume_offset: int) -> bytes:
+        def on_item(item: AgentStreamOutput, resume_offset: str) -> bytes:
             match item:
                 case AgentTurnTimeout():
                     return _sse(
@@ -719,14 +719,14 @@ def _update_id(req: ChatRequestBody) -> str | None:
     return f"msg-{req.request_id}" if req.request_id else None
 
 
-def _sse(event: str, data: dict, resume_offset: int | None = None) -> bytes:
+def _sse(event: str, data: dict, resume_offset: str | None = None) -> bytes:
     payload = {**data}
     if resume_offset is not None:
         payload["resume_offset"] = resume_offset
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n".encode()
 
 
-def _yield_item(item, resume_offset: int | None = None) -> bytes:
+def _yield_item(item, resume_offset: str | None = None) -> bytes:
     if isinstance(item, AgentEvent):
         payload = item.event
         data = {

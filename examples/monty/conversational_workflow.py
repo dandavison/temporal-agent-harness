@@ -23,7 +23,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 from temporalio.workflow import ActivityConfig
 
 with workflow.unsafe.imports_passed_through():
@@ -117,7 +116,6 @@ class MontyChatAgentWorkflow:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # Demo stance: require human approval for EVERY tool call that reaches the outside
             # world — both the `run_travel_code` tool and each travel host call the script makes
             # (search/book flights & hotels), since every call is dispatched through run_tool and

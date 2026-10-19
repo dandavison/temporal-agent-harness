@@ -10,6 +10,7 @@ import type {
   CreateSessionResponse,
   FileChunk,
   FileViewRequest,
+  ResumeOffset,
   Session,
   SubmitMessageResponse,
   ToolApprovalRequest,
@@ -32,7 +33,7 @@ export interface AgentApi {
    * works on any agent regardless of what it accepts.
    */
   closeSession(sessionId: WorkflowId): Promise<void>;
-  attach(sessionId: WorkflowId, fromOffset?: number, signal?: AbortSignal): AsyncIterable<AgentSseFrame>;
+  attach(sessionId: WorkflowId, fromOffset?: ResumeOffset, signal?: AbortSignal): AsyncIterable<AgentSseFrame>;
   submitMessage(request: ChatRequest, signal?: AbortSignal): Promise<SubmitMessageResponse>;
   chat(request: ChatRequest, signal?: AbortSignal): AsyncIterable<AgentSseFrame>;
   approve(request: ToolApprovalRequest): Promise<ToolApprovalResponse>;

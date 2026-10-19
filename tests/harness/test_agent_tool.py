@@ -1,6 +1,6 @@
 # ABOUTME: End-to-end tests for the @agent.activity_tool_defn / @agent.tool_defn
-# decorators + run_tool, run against the Temporal time-skipping test server (the only
-# faithful way — the activity-side publishing path only exists when a real activity
+# decorators + run_tool, run against a real Temporal server (see tests/utils/stream_env.py;
+# the only faithful way — the activity-side publishing path only exists when a real activity
 # executes). Validates that:
 #   * an ACTIVITY tool (@agent.activity_tool_defn) publishes tool_start/tool_end from
 #     INSIDE its activity, carrying the call id run_tool parked for it;
@@ -13,13 +13,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
 
 import pytest_asyncio
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from temporal_agent_harness.harness import AgentWorkflowRunner, agent
@@ -37,6 +34,8 @@ from temporal_agent_harness.harness.agent_protocol import (
 )
 from temporal_agent_harness.harness.agent import Injected
 from temporal_agent_harness.harness.agent_workflow import _injected_param_names
+from temporal_agent_harness.harness.streams import subscribe
+from tests.utils.stream_env import start_env
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +66,6 @@ class ToolProbeAgent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
 
@@ -95,9 +93,7 @@ class ToolProbeAgent:
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"agent-tool-test-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -115,13 +111,9 @@ async def client_and_queue():
 async def _collect_until_turn_end(
     client: Client, workflow_id: str
 ) -> list[AgentEvent]:
-    stream = WorkflowStreamClient.create(client, workflow_id)
     events: list[AgentEvent] = []
-    async for item in stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC],
-        from_offset=0,
-        result_type=AgentEvent,
-        poll_cooldown=timedelta(milliseconds=10),
+    async for item in subscribe(
+        client, workflow_id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
     ):
         envelope: AgentEvent = item.data
         events.append(envelope)

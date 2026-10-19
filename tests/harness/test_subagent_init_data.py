@@ -17,8 +17,6 @@ from pydantic import BaseModel
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStream
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from temporal_agent_harness.harness import AgentWorkflowRunner, agent
@@ -33,6 +31,7 @@ from temporal_agent_harness.harness.agent_protocol import (
     TextReply,
     ToolApprovalPolicy,
 )
+from tests.utils.stream_env import start_env
 
 
 class Trip(BaseModel):
@@ -47,7 +46,6 @@ class TripPlannerChild:
     def __init__(self, config: AgentConfig, data: Trip | None = None) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._trip = data
@@ -68,7 +66,6 @@ class RequiredTripPlannerChild:
     def __init__(self, config: AgentConfig, data: Trip) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._trip = data
@@ -89,7 +86,6 @@ class UntypedChild:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
 
@@ -142,7 +138,6 @@ class PlannerParent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._next_traveler = ""
@@ -183,7 +178,7 @@ class PlannerParent:
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter)
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"subagent-init-data-{uuid.uuid4()}"
     async with Worker(
         env.client,

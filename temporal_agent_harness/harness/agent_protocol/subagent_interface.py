@@ -53,12 +53,13 @@ class RunSubagentTurnInput(BaseModel):
         description="The send_agent_message envelope 'payload': the JSON of the target "
         "handler's input model.",
     )
-    from_offset: int = Field(
-        default=0,
-        description="Where to begin consuming the child's stream — the caller's last-known "
-        "offset (the previous turn's returned consumed_offset). A PERFORMANCE HINT ONLY, never "
-        "correctness-critical: the streamer filters to this turn's turn_id, so a stale (smaller) "
-        "offset merely replays a few already-seen events, and it can never be too large (the next "
+    from_offset: str = Field(
+        default="",
+        description="The cursor after which to consume the child's stream — the caller's "
+        "last-known position (the previous turn's returned consumed_offset; empty for the "
+        "stream's beginning). A PERFORMANCE HINT ONLY, never "
+        "correctness-critical: the streamer filters to this turn's turn_id, so a stale (earlier) "
+        "cursor merely replays a few already-seen events, and it can never be too large (the next "
         "turn's events always follow the prior turn's turn_end, where the prior consumed_offset "
         "points). So the caller need not — and must not — fetch the live stream head.",
     )
@@ -94,8 +95,8 @@ class SubagentTurnResult(BaseModel):
     turn_number: int = Field(
         description="The number of the turn the child actually ran."
     )
-    consumed_offset: int = Field(
-        description="The child stream position just past this turn's turn_end. The caller "
+    consumed_offset: str = Field(
+        description="The child stream cursor just past this turn's turn_end. The caller "
         "stores it and threads it back as the next turn's from_offset, so each turn streams "
         "from where the last one ended (cheap resume, no full-history replay)."
     )

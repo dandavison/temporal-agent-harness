@@ -1,7 +1,7 @@
 # ABOUTME: Tests for the console's file view: POST /api/files/view runs a mount's
-# vfs.<name>.view activity as a standalone activity on a real local dev server (the time-skipping
-# test server cannot run standalone activities), pages through the file, and turns failures
-# into HTTP errors the viewer can show.
+# vfs.<name>.view activity as a standalone activity on a real server (see
+# tests/utils/stream_env.py; the time-skipping test server cannot run standalone activities),
+# pages through the file, and turns failures into HTTP errors the viewer can show.
 #
 # Run with: uv run pytest tests/web/test_file_view.py -v
 
@@ -27,6 +27,7 @@ from temporal_agent_harness.harness.code_mode.activity_fs import MAX_VIEW_BYTES
 from temporal_agent_harness.web import file_view
 from temporal_agent_harness.web.app import create_agent_harness_app
 from temporal_agent_harness.web.session_manager import AgentRegistry
+from tests.utils.stream_env import StreamEnv, start_env
 
 FILES = {"notes.md": b"# Notes\n", "big.txt": b"y" * (MAX_VIEW_BYTES + 3)}
 
@@ -59,14 +60,14 @@ class Pages(agent.ActivityFileSystem[PagesConfig], name="web-view-test"):
 
 
 @pytest_asyncio.fixture(scope="module")
-async def env() -> AsyncGenerator[WorkflowEnvironment, None]:
-    env = await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter)
+async def env() -> AsyncGenerator[StreamEnv, None]:
+    env = await start_env(data_converter=pydantic_data_converter)
     yield env
     await env.shutdown()
 
 
 @pytest_asyncio.fixture
-async def task_queue(env: WorkflowEnvironment) -> AsyncGenerator[str, None]:
+async def task_queue(env: StreamEnv) -> AsyncGenerator[str, None]:
     queue = f"file-view-{uuid.uuid4()}"
     async with Worker(env.client, task_queue=queue, activities=Pages.activities):
         yield queue
@@ -84,7 +85,7 @@ def _body(task_queue: str, path: str, *, offset: int = 0, shelf: str = "main") -
     }
 
 
-async def _post(env: WorkflowEnvironment, body: dict) -> httpx.Response:
+async def _post(env: StreamEnv | WorkflowEnvironment, body: dict) -> httpx.Response:
     app = create_agent_harness_app(registry=AgentRegistry(agents=[]))
     app.state.temporal = env.client
     async with httpx.AsyncClient(

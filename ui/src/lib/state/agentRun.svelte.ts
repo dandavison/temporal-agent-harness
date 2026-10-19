@@ -249,7 +249,7 @@ export class AgentRunController {
   agents = $state<AgentDescriptor[]>([]);
   sessions = $state<Session[]>([]);
   session = $state<Session | null>(null);
-  lastResumeOffset = $state(0);
+  lastResumeOffset = $state("");
   #streamVersion = 0;
   #connectionVersion = 0;
   #sendVersion = 0;
@@ -276,7 +276,7 @@ export class AgentRunController {
    */
   #awaitingMessages = new Set<string>();
   #interfaceRequests = new Set<string>();
-  #workflowResumeOffsets = new Map<string, number>();
+  #workflowResumeOffsets = new Map<string, string>();
   #workflowAttachAbort = new Map<string, AbortController>();
   #frameKeys = new Set<string>();
   #frameCacheTimer: number | null = null;
@@ -759,9 +759,9 @@ export class AgentRunController {
     this.#applyWorkflowExecutionState(state);
   }
 
-  #resumeOffsetForWorkflow(workflowId: string): number {
+  #resumeOffsetForWorkflow(workflowId: string): string {
     if (workflowId === this.session?.workflow_id) return this.lastResumeOffset;
-    return this.#workflowResumeOffsets.get(workflowId) ?? 0;
+    return this.#workflowResumeOffsets.get(workflowId) ?? "";
   }
 
   #messageTargets(): MessageTarget[] {
@@ -1095,7 +1095,7 @@ export class AgentRunController {
       if (this.#isWorkflowClosed(session.workflow_id)) return;
       streaming = true;
       this.#streamInBackground(
-        this.attach(0),
+        this.attach(""),
         connectionVersion,
         "Failed to create agent session."
       );
@@ -1202,7 +1202,7 @@ export class AgentRunController {
     const isCurrentStream = (): boolean =>
       streamVersion === this.#streamVersion &&
       this.session?.workflow_id === session.workflow_id;
-    let offset = Math.max(0, fromOffset);
+    let offset = fromOffset;
     let attempt = 0;
     try {
       while (isCurrentStream()) {
@@ -1286,11 +1286,11 @@ export class AgentRunController {
         if (!(await this.#streamDroppedMidRun(session.workflow_id))) break;
         await this.#sleepUnlessWoken(reattachBackoffMs[attempt], signal);
         attempt += 1;
-        /* Resume only from an offset the server already proved it holds, by
-           having sent it. An offset past the end answers 200 and then hangs
-           open forever, so inventing one trades a quiet console for a wedged
-           one. */
-        offset = Math.max(offset, this.lastResumeOffset);
+        /* Resume only from a cursor the server already proved it holds, by
+           having sent it: the last one this session received. A cursor past
+           the end answers 200 and then hangs open forever, so inventing one
+           trades a quiet console for a wedged one. */
+        offset = this.lastResumeOffset;
       }
     } catch (error) {
       if (!isAbortError(error)) throw error;
@@ -1794,10 +1794,10 @@ export class AgentRunController {
     this.#catchingUp = false;
     this.#liveFrameSeen = false;
     this.#sinceCatchUpPublish = 0;
-    this.#workflowResumeOffsets = new Map<string, number>();
+    this.#workflowResumeOffsets = new Map<string, string>();
     this.viewIndex = 0;
     this.following = true;
-    this.lastResumeOffset = 0;
+    this.lastResumeOffset = "";
   }
 
   /**
@@ -1829,24 +1829,15 @@ export class AgentRunController {
 
     if (
       "resume_offset" in frame.data &&
-      typeof frame.data.resume_offset === "number"
+      typeof frame.data.resume_offset === "string"
     ) {
       const resumeOffsetOwner =
         options.sourceWorkflowId ?? (isRootFrame ? publisherWorkflowId : undefined);
       if (resumeOffsetOwner) {
-        this.#workflowResumeOffsets.set(
-          resumeOffsetOwner,
-          Math.max(
-            this.#workflowResumeOffsets.get(resumeOffsetOwner) ?? 0,
-            frame.data.resume_offset
-          )
-        );
+        this.#workflowResumeOffsets.set(resumeOffsetOwner, frame.data.resume_offset);
       }
       if (isRootFrame) {
-        this.lastResumeOffset = Math.max(
-          this.lastResumeOffset,
-          frame.data.resume_offset
-        );
+        this.lastResumeOffset = frame.data.resume_offset;
       }
     }
     // Our own message's terminal is what clears `sending` — not the stream going idle. With a

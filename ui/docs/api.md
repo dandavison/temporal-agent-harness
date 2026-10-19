@@ -256,7 +256,6 @@ type SubmitMessageResponse = {
   turn_number: number
   turn_id: string
   message_id: string
-  accepted_offset: number
   disposition: "opened" | "joined" | "queued"
 }
 ```
@@ -296,17 +295,19 @@ The packaged UI keeps a familiar affordance on top of this: typing `/` in the
 composer opens a picker over the handlers `agent_interface` returned. That is
 purely a client-side convention — the harness has no notion of a slash.
 
-### `GET /api/attach?session_id=...&from_offset=0`
+### `GET /api/attach?session_id=...&from_offset=...`
 
 Replays or tails an existing merged session stream.
 
 Response media type: `text/event-stream`.
 
-When `from_offset` is `0`, the server replays the merged session event history.
-When it is non-zero, pass a prior frame's `resume_offset`; only newer root-stream
-positions are streamed. The stream returns when the workflow is idle and caught
-up. `resume_offset` is a root-stream cursor, not a display ordinal: several
-subagent frames may carry the same value.
+When `from_offset` is empty or omitted, the server replays the merged session event
+history. Otherwise pass a prior frame's `resume_offset` (URL-encoded); only newer
+root-stream positions are streamed. The stream returns when the workflow is idle and
+caught up. `resume_offset` is an opaque root-stream cursor (base64url text), not a
+display ordinal: it can be compared only for equality, and several subagent frames may
+carry the same value. Frames arrive in stream order, so the last frame's `resume_offset`
+is the one to resume from.
 
 ## Error Responses
 
@@ -358,7 +359,7 @@ Example:
 
 ```txt
 event: reply_delta
-data: {"type":"reply_delta","agent_id":"root","turn_id":"t1","turn_number":1,"timestamp":1710000001,"resume_offset":2,"text":"Hi"}
+data: {"type":"reply_delta","agent_id":"root","turn_id":"t1","turn_number":1,"timestamp":1710000001,"resume_offset":"c2","text":"Hi"}
 
 ```
 
@@ -510,7 +511,7 @@ subagent_message_sent: {
   workflow_id: string
   handler: string
   subagent_turn: number
-  from_offset: number
+  from_offset: string
 }
 
 subagent_reply_received: {
@@ -573,22 +574,22 @@ A basic text turn can be mocked as:
 
 ```txt
 event: message_accepted
-data: {"type":"message_accepted","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":"m1","timestamp":1710000000,"resume_offset":1,"handler":"ask","payload":{"text":"hello"},"disposition":"opened"}
+data: {"type":"message_accepted","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":"m1","timestamp":1710000000,"resume_offset":"c1","handler":"ask","payload":{"text":"hello"},"disposition":"opened"}
 
 event: turn_started
-data: {"type":"turn_started","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":null,"timestamp":1710000000,"resume_offset":2}
+data: {"type":"turn_started","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":null,"timestamp":1710000000,"resume_offset":"c2"}
 
 event: message_handler_start
-data: {"type":"message_handler_start","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":"m1","timestamp":1710000000,"resume_offset":3}
+data: {"type":"message_handler_start","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":"m1","timestamp":1710000000,"resume_offset":"c3"}
 
 event: reply_delta
-data: {"type":"reply_delta","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":"m1","timestamp":1710000001,"resume_offset":4,"text":"Hi"}
+data: {"type":"reply_delta","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":"m1","timestamp":1710000001,"resume_offset":"c4","text":"Hi"}
 
 event: message_handler_end
-data: {"type":"message_handler_end","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":"m1","timestamp":1710000002,"resume_offset":5,"output":{"text":"Hi there."}}
+data: {"type":"message_handler_end","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":"m1","timestamp":1710000002,"resume_offset":"c5","output":{"text":"Hi there."}}
 
 event: turn_end
-data: {"type":"turn_end","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":null,"timestamp":1710000003,"resume_offset":6}
+data: {"type":"turn_end","agent_id":"root","turn_id":"t1","turn_number":1,"message_id":null,"timestamp":1710000003,"resume_offset":"c6"}
 
 ```
 

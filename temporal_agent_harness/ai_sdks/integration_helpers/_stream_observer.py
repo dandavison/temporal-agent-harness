@@ -24,7 +24,7 @@ from contextlib import (
 from datetime import timedelta
 from typing import Any, AsyncIterator, Optional, Protocol, TypeVar
 
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
+from temporal_agent_harness.harness.streams import ActivityStreamPublisher, activity_publisher
 
 __all__ = [
     "StreamObserver",
@@ -46,7 +46,7 @@ class StreamObserver(Protocol[RawEvent]):
     """Consumes the raw provider events of ONE streamed call, live, in the activity.
 
     An async context manager: ``__aenter__`` acquires any sink resource (e.g. a
-    ``WorkflowStream`` publisher), ``on_event`` is called once per raw event in
+    stream publisher), ``on_event`` is called once per raw event in
     arrival order, and ``__aexit__`` releases — receiving the exception if the
     stream errored.
     """
@@ -61,7 +61,7 @@ class StreamObserver(Protocol[RawEvent]):
 class ObserverFactory(Protocol):
     """Per-call factory: an opaque routing token -> a fresh observer context manager.
 
-    Per-call state (arg buffers, tool brackets, the WorkflowStream publisher) lives
+    Per-call state (arg buffers, tool brackets, the stream publisher) lives
     inside the returned observer, so concurrent streamed calls on a shared worker
     never bleed state into one another.
 
@@ -79,7 +79,7 @@ class ObserverFactory(Protocol):
 
 
 class RawTopicObserver:
-    """Default observer: publish each raw event to a ``WorkflowStream`` topic.
+    """Default observer: publish each raw event to a topic of the workflow's stream.
 
     Reproduces the SDK plugins' current streaming behavior, generalized to any
     event type: open a publisher from within the activity, then publish every
@@ -100,30 +100,28 @@ class RawTopicObserver:
         self._event_type = event_type
         self._batch_interval = batch_interval
         self._stack: AsyncExitStack | None = None
-        self._topic: Any = None
+        self._publisher: ActivityStreamPublisher | None = None
 
     async def __aenter__(self) -> RawTopicObserver:
         self._stack = AsyncExitStack()
-        publisher = WorkflowStreamClient.from_within_activity(
-            batch_interval=self._batch_interval,
+        self._publisher = await self._stack.enter_async_context(
+            activity_publisher(self._batch_interval)
         )
-        await self._stack.enter_async_context(publisher)
-        self._topic = publisher.topic(self._topic_name, type=self._event_type)
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool | None:
         if self._stack is not None:
             await self._stack.aclose()
             self._stack = None
-        self._topic = None
+        self._publisher = None
         # Never swallow a stream error: the batched-collect path owns failures.
         return False
 
     async def on_event(self, event: Any) -> None:
-        if self._topic is None:
+        if self._publisher is None:
             return
         try:
-            self._topic.publish(event)
+            self._publisher.publish(event, topic=self._topic_name)
         except Exception:
             # Best-effort, mirrors the current activity behavior: a bad event
             # must not break the batched return the workflow parses.
@@ -155,7 +153,7 @@ def select_observer(
       hands the opaque token straight through; it never type-switches on it, and passes
       the configured flush cadence so a custom observer's publisher can honor it).
     - no factory but a ``str`` token → the default :class:`RawTopicObserver`,
-      treating the token as a ``WorkflowStream`` topic name.
+      treating the token as a topic name of the workflow's stream.
     - no factory and a non-``str`` token → no observer (a non-default token with
       nothing configured to consume it is a no-op rather than an error).
     """

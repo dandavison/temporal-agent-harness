@@ -14,9 +14,8 @@ import pytest
 import pytest_asyncio
 from temporalio.client import Client, WorkflowHandle
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
+from temporalio.testing import ActivityEnvironment
 from temporalio.worker import Replayer, Worker
 
 from examples.code_mode_memory import local_disk
@@ -38,7 +37,9 @@ from temporal_agent_harness.harness.code_mode.activity_fs import (
     FsRename,
     FsWrite,
 )
+from temporal_agent_harness.harness.streams import subscribe
 from temporal_agent_harness.plugin import AgentHarnessPlugin
+from tests.utils.stream_env import start_env
 
 from ._memory_e2e_parent import CodeModeMemoryE2EParentWorkflow
 
@@ -153,7 +154,7 @@ index = Path('/memory/MEMORY.md').read_text()
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter)
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"code-mode-memory-e2e-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -184,9 +185,8 @@ async def _send(client: Client, handle: WorkflowHandle[Any, Any], script: str) -
         AgentMessage(type="run_code", payload={"script": script}),
         result_type=AgentMessageReply,
     )
-    stream = WorkflowStreamClient.create(client, handle.id)
-    async for item in stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC], from_offset=0, result_type=AgentEvent
+    async for item in subscribe(
+        client, handle.id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
     ):
         envelope: AgentEvent = item.data
         if (

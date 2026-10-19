@@ -1,5 +1,5 @@
-# ABOUTME: End-to-end test for the Monty dynamic agent against the time-skipping test
-# server. Sends a RunScript whose script calls BOTH host functions (each backed by a
+# ABOUTME: End-to-end test for the Monty dynamic agent against the stream prototype's
+# server (see tests/utils/stream_env.py). Sends a RunScript whose script calls BOTH host functions (each backed by a
 # durable activity) and asserts the reply carries the script's stdout + final value.
 #
 # This doubles as the experiment's key check: it runs under the DEFAULT (sandboxed)
@@ -15,8 +15,6 @@ import uuid
 import pytest_asyncio
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from temporal_agent_harness.harness.agent_protocol import (
@@ -29,7 +27,9 @@ from temporal_agent_harness.harness.agent_protocol import (
     AgentMessageReply,
 )
 
+from temporal_agent_harness.harness.streams import subscribe
 from temporal_agent_harness.plugin import AgentHarnessPlugin
+from tests.utils.stream_env import start_env
 
 from examples.monty import activities
 from examples.monty.workflow import MontyDynamicAgentWorkflow
@@ -37,9 +37,7 @@ from examples.monty.workflow import MontyDynamicAgentWorkflow
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"monty-agent-test-{uuid.uuid4()}"
     # Mirrors examples/monty/worker.py: the harness plugin registers the travel tools' activity
     # bodies. (Passed to the Worker rather than the
@@ -57,12 +55,9 @@ async def client_and_queue():
 
 
 async def _reply_text(client: Client, workflow_id: str) -> str:
-    stream = WorkflowStreamClient.create(client, workflow_id)
     reply: str | None = None
-    async for item in stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC],
-        from_offset=0,
-        result_type=AgentEvent,
+    async for item in subscribe(
+        client, workflow_id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
     ):
         envelope: AgentEvent = item.data
         if envelope.event.type == AgentEventType.MESSAGE_HANDLER_END:

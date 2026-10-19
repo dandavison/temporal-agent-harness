@@ -590,8 +590,8 @@ agents-SDK `StreamEvent` union (so raw model events arrive as
 `RawResponsesStreamEvent.data`).
 
 External consumers (UIs, tracing pipelines, etc.) observe events as
-they arrive by hosting a [`WorkflowStream`](../workflow_streams/README.md)
-in the workflow and subscribing with `WorkflowStreamClient`. The
+they arrive by reading the workflow's stream (`temporalio.streams`),
+which the worker's stream backend stores. The
 streaming activity publishes each event to the topic configured on
 `ModelActivityParameters.streaming_topic`. The topic is required
 when using `Runner.run_streamed`; calling it without a configured topic
@@ -619,10 +619,10 @@ class MyAgent:
         return result.final_output
 ```
 
-To publish raw model events to external subscribers, host a
-`WorkflowStream` in the workflow and configure
-`OpenAIAgentsPlugin(model_params=ModelActivityParameters(streaming_topic="events"))`. See [`temporalio.contrib.workflow_streams`](../workflow_streams/README.md) for the
-publisher and subscriber API.
+To publish raw model events to external subscribers, configure
+`OpenAIAgentsPlugin(model_params=ModelActivityParameters(streaming_topic="events"))`
+and give the worker a stream backend (`AgentHarnessPlugin` does). See `temporalio.streams` for
+the reader API.
 
 `RunResultStreaming.stream_events()` yields the agents-SDK
 `StreamEvent` union (`RawResponsesStreamEvent`, `RunItemStreamEvent`,
@@ -632,8 +632,7 @@ by contrast, receive the unwrapped native events directly because the
 streaming activity publishes them straight from `Model.stream_response`.
 
 Streaming is incompatible with `use_local_activity` because local
-activities support neither activity heartbeats nor the workflow stream
-signal channel.
+activities do not support activity heartbeats.
 
 Activity retries surface to workflow-stream subscribers but not to
 `RunResultStreaming.stream_events()`. Events are published to the
@@ -641,11 +640,10 @@ stream as `Model.stream_response` produces them, so a partial attempt
 that fails mid-response leaves its emitted events on the stream and the
 retry attempt publishes a second sequence. `stream_events()` only sees
 the final successful attempt's collected events because it consumes the
-activity's return value. Workflow-stream subscribers should treat
-retries the same way as any other workflow_streams publisher — see
-[Delivery semantics](../workflow_streams/README.md) for the trade and
-the conventional `RETRY` event pattern for surfacing the transition to
-consumers.
+activity's return value. Each stream record carries its producer's epoch, which
+for an activity is its attempt stamp (distinct per attempt only with the server's
+retry stamp enabled), so a subscriber can discard the records of
+a superseded attempt.
 
 ## Feature Support
 

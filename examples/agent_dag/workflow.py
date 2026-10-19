@@ -26,7 +26,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 
 with workflow.unsafe.imports_passed_through():
     from agents import Agent as OpenAIAgent
@@ -152,7 +151,6 @@ class DagBuilderAgentWorkflow:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # The editor tools and run_agent are inherently safe (the user's own editor, and
             # simulated step tools), so nothing waits on a click.
             approval_policy_default=ToolApprovalPolicy.allow_inherently_safe(),

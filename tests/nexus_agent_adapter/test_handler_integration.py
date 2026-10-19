@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from temporalio import workflow
 from temporalio.api.enums.v1 import EventType
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStream
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -68,7 +67,6 @@ class ProbeAgent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
 
@@ -369,7 +367,6 @@ class GatedProbeAgent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.always_require_human_approval(),
         )
 

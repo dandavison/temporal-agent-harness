@@ -19,6 +19,7 @@ from temporal_agent_harness.harness.agent_protocol import (
     SubagentStreamUnavailable,
 )
 from temporal_agent_harness.harness.stream_merge.cursor import Cursor
+from temporal_agent_harness.harness.streams import BEGINNING
 from temporal_agent_harness.harness.stream_merge.gates import (
     Gates,
     MountChild,
@@ -48,12 +49,12 @@ ShouldStop = Callable[[Cursor, AgentEvent], Awaitable[bool]]
 # What the merge yields per step: the event plus the **resume offset** — a ROOT-stream resume CURSOR
 # (NOT a per-event coordinate) that a consumer records and hands back to ``attach(from_offset=...)``
 # to resume without re-replaying already-seen root events. It advances past EVERY root event emitted
-# (to ``ev_offset + 1``) and does NOT move on a subagent's own events — so every event within one
+# (to that event's cursor) and does NOT move on a subagent's own events — so every event within one
 # subagent turn's bracket carries the SAME value: the cursor as of that turn's
 # ``subagent_message_sent`` (the root offset, not the child's own offset). Any root offset is a safe
 # resume point (see ``merge_stream``); it is neither the event's own per-stream offset nor a merged
 # display ordinal (the cross-stream interleaving itself is never a resumable position).
-MergedItem = tuple[AgentEvent, int]
+MergedItem = tuple[AgentEvent, str]
 
 
 def select_replay(candidates: list[Cursor]) -> Cursor:
@@ -106,7 +107,7 @@ class _Merge:
         # The ROOT-stream resume cursor handed back to the consumer (see ``MergedItem``). Seeded to
         # the offset the merge started from (resuming there again loses nothing) and advanced past
         # each ROOT event as it is emitted (subagent events leave it unchanged).
-        self._root_resume_offset = 0
+        self._root_resume_offset = BEGINNING
         # PER-CHILD stall deadlines: child_workflow_id -> the event-loop time by which, if that
         # child is STILL the (sole) thing close-gating a buffered parent ``subagent_reply_received``,
         # we presume it unreachable and give up on it. Set when a child first starts blocking and
@@ -120,9 +121,10 @@ class _Merge:
         self,
         workflow_id: str,
         *,
-        from_offset: int,
+        from_offset: str,
         is_child: bool,
         skip_until_turn_id: str | None = None,
+        mark: str | None = None,
     ) -> None:
         """Mount a stream as a new cursor (idempotent — a re-used child is mounted once).
 
@@ -150,6 +152,7 @@ class _Merge:
             mount_index=self._mount_seq,
             from_offset=from_offset,
             skip_until_turn_id=skip_until_turn_id,
+            mark=mark,
         )
         self._mount_seq += 1
 
@@ -172,7 +175,8 @@ class _Merge:
         self,
         *,
         root_workflow_id: str,
-        root_from_offset: int,
+        root_from_offset: str,
+        root_mark: str | None,
         skip_until_turn_id: str | None,
     ) -> AsyncIterator[MergedItem]:
         self._mount(
@@ -180,6 +184,7 @@ class _Merge:
             from_offset=root_from_offset,
             is_child=False,
             skip_until_turn_id=skip_until_turn_id,
+            mark=root_mark,
         )
         try:
             async for item in self._drive():
@@ -206,7 +211,7 @@ class _Merge:
                 cur = self._select(candidates)
                 ev = cur.head
                 assert ev is not None  # candidates filter guarantees it
-                ev_offset = cur.head_offset
+                ev_cursor = cur.head_cursor
                 cur.head = None  # consumed → _ensure_pulls re-pulls this cursor next loop
                 # Advance the resume cursor PAST every ROOT event emitted (any root offset is a safe
                 # resume point — ``attach`` resumes with NO skip, and a subagent whose turn began
@@ -216,7 +221,7 @@ class _Merge:
                 # a reconnect mid a subagent turn forgoes that subagent's remaining detail (lossless
                 # only at root-event granularity; see ``merge_stream``).
                 if not cur.is_child:
-                    self._root_resume_offset = ev_offset + 1
+                    self._root_resume_offset = ev_cursor
                 yield (ev, self._root_resume_offset)
                 action = self._gates.on_emit(
                     is_child=cur.is_child, source_workflow_id=cur.workflow_id, ev=ev
@@ -455,19 +460,20 @@ async def merge_stream(
     *,
     client: Client,
     root_workflow_id: str,
-    root_from_offset: int,
+    root_from_offset: str,
     skip_until_turn_id: str | None,
     select: SelectPolicy,
     should_stop: ShouldStop,
     stall_grace_seconds: float = DEFAULT_STALL_GRACE_SECONDS,
+    root_mark: str | None = None,
 ) -> AsyncIterator[MergedItem]:
     """Drive one gated k-way merge, yielding ``(event, resume_offset)`` pairs (see :data:`MergedItem`).
 
     Mounts ``root_workflow_id`` at ``root_from_offset``, then interleaves the root with every subagent
     stream it mounts on a ``subagent_message_sent``, recursively. ``skip_until_turn_id`` skips the root
     to a SPECIFIC turn's ``turn_started`` (``send_message``, which must land on the submitted turn even
-    if its acceptance offset is mid a prior turn); ``None`` does no skipping — used by BOTH ``attach``
-    from 0 (replay everything) and ``attach`` resume from an arbitrary offset (start exactly there).
+    if its start cursor is mid a prior turn); ``None`` does no skipping — used by BOTH ``attach``
+    from the beginning (replay everything) and ``attach`` resume from an arbitrary offset (start exactly there).
     Resuming mid-stream is safe without skipping: a subagent whose turn began before ``root_from_offset``
     is never mounted (we never emit its ``subagent_message_sent``), so its events are absent and its
     later ``subagent_reply_received`` is released by the unmounted-stuck give-up; subagents dispatched
@@ -479,7 +485,8 @@ async def merge_stream(
     workflow) or stalls is given up on — its close gate released so the parent flows, and a
     synthetic ``subagent_stream_unavailable`` marker emitted; the merge never retries (a fresh attach
     recovers). ``stall_grace_seconds`` bounds how long a stalled child may block a buffered parent
-    reply before that give-up (a liveness backstop, not an ordering input)."""
+    reply before that give-up (a liveness backstop, not an ordering input). ``root_mark`` is a root
+    cursor that each root head reports reaching (:attr:`Cursor.head_reached_mark`)."""
     engine = _Merge(
         client=client,
         select=select,
@@ -489,6 +496,7 @@ async def merge_stream(
     async for item in engine.run(
         root_workflow_id=root_workflow_id,
         root_from_offset=root_from_offset,
+        root_mark=root_mark,
         skip_until_turn_id=skip_until_turn_id,
     ):
         yield item

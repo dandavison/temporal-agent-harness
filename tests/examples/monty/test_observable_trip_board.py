@@ -21,8 +21,6 @@ import jsonpatch
 import pytest_asyncio
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from temporal_agent_harness.harness.agent_protocol import (
@@ -34,7 +32,9 @@ from temporal_agent_harness.harness.agent_protocol import (
     AgentMessage,
     AgentMessageReply,
 )
+from temporal_agent_harness.harness.streams import subscribe
 from temporal_agent_harness.plugin import AgentHarnessPlugin
+from tests.utils.stream_env import start_env
 
 from examples.monty import activities
 from examples.monty.trip_board import DEFAULT_TASKS
@@ -68,9 +68,7 @@ SCRIPT = (
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"monty-board-test-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -99,9 +97,8 @@ async def _run_script(client: Client, task_queue: str, script: str) -> list[Agen
     )
 
     events: list[AgentEvent] = []
-    stream = WorkflowStreamClient.create(client, handle.id)
-    async for item in stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC], from_offset=0, result_type=AgentEvent
+    async for item in subscribe(
+        client, handle.id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
     ):
         envelope: AgentEvent = item.data
         events.append(envelope)

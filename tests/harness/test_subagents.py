@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel, Field
@@ -129,7 +128,7 @@ def test_register_keys_by_handle_and_stores_workflow_id():
     assert inst.handle == "a3f9c2"
     assert inst.workflow_id == "sample-subagent-<uuid>"  # the real child id, hidden from the model
     assert inst.agent_key == "sample"
-    assert inst.last_consumed_offset == 0
+    assert inst.last_consumed_offset == ""
     assert st.subagent("a3f9c2") is inst
     assert st.has_subagent("a3f9c2") and not st.has_subagent("nope")
 
@@ -376,23 +375,22 @@ def test_distinct_subagents_have_independent_gates_and_counters():
 
 
 class _FakeItem:
-    """One ``WorkflowStreamItem``: an offset plus the decoded ``AgentEvent``."""
+    """One ``StreamItem``: a cursor plus the decoded ``AgentEvent``."""
 
     def __init__(self, offset: int, data: AgentEvent) -> None:
-        self.offset = offset
+        self.cursor = str(offset + 1)
         self.data = data
 
 
-class _FakeStream:
-    def __init__(self, items: list[_FakeItem]) -> None:
-        self._items = items
-
-    def subscribe(self, **_kwargs):
+def _fake_subscribe(items: list[_FakeItem]):
+    def subscribe(*_args, **_kwargs):
         async def gen():
-            for item in self._items:
+            for item in items:
                 yield item
 
         return gen()
+
+    return subscribe
 
 
 def _child_event(payload, *, turn_id: str, message_id: str | None) -> AgentEvent:
@@ -422,12 +420,8 @@ def _shared_child_turn(*, ours: str, theirs: str) -> list[_FakeItem]:
 
 def _consume(items: list[_FakeItem], monkeypatch):
     """Run ``_consume_child_turn`` over ``items``, returning ``(output, got_reply)``."""
-    activities = SubagentActivities(client=None)  # the stream client is patched out
-    monkeypatch.setattr(
-        subagent_activities,
-        "WorkflowStreamClient",
-        SimpleNamespace(create=lambda _client, _wf: _FakeStream(items)),
-    )
+    activities = SubagentActivities(client=None)  # the stream reader is patched out
+    monkeypatch.setattr(subagent_activities, "subscribe", _fake_subscribe(items))
     req = RunSubagentTurnInput(
         child_workflow_id="child-wf",
         type="ask",
@@ -443,7 +437,7 @@ def _consume(items: list[_FakeItem], monkeypatch):
         turn_id="child-turn-4",
         turn_number=4,
         message_id="ours",
-        consumed_offset=0,
+        consumed_offset="",
     )
     return asyncio.run(activities._consume_child_turn(req, progress))
 

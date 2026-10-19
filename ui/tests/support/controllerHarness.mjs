@@ -161,7 +161,7 @@ export function variedFrame(i, { replay = true } = {}) {
       turn_id: `t${(i / 50) | 0}`,
       turn_number: 1 + ((i / 50) | 0),
       timestamp: i * 0.01,
-      resume_offset: i + 1,
+      resume_offset: `c${i + 1}`,
       event_offset: i,
       delta: `token ${i}`,
       user_message: `ask ${i}`,

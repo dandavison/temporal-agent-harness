@@ -24,9 +24,8 @@
 # a parent's. Collecting multiple agents' streams for a UI is a future client concern.
 #
 # DESIGN — Temporal Client: the activity needs a ``Client`` to talk to
-# the *child* (both the ``send_agent_message`` update and the stream subscribe). It can't use
-# ``WorkflowStreamClient.from_within_activity()`` (that targets the activity's own parent).
-# So this is a CLASS that closes over the worker's client; the bound method is what gets
+# the *child* (both the ``send_agent_message`` update and the stream subscribe); the activity's
+# own stream publisher targets the activity's own parent. So this is a CLASS that closes over the worker's client; the bound method is what gets
 # registered as the activity. ``AgentHarnessPlugin`` does that instantiation from the worker's
 # own client (it is why the plugin overrides ``configure_worker``), so agents normally never
 # touch this class — reach for it directly only when hand-building a worker's activity list
@@ -37,13 +36,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import timedelta
 from typing import Any
 
 from pydantic import BaseModel
 from temporalio import activity
 from temporalio.client import Client, WorkflowUpdateFailedError
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError
 
 from temporal_agent_harness.harness.agent_client import (
@@ -61,6 +58,7 @@ from temporal_agent_harness.harness.agent_protocol import (
     SubagentTurnResult,
 )
 from temporal_agent_harness.harness.agent_workflow import AgentWorkflowRunner
+from temporal_agent_harness.harness.streams import subscribe
 
 
 class _TurnProgress(BaseModel):
@@ -81,7 +79,7 @@ class _TurnProgress(BaseModel):
     turn_id: str
     turn_number: int
     message_id: str
-    consumed_offset: int
+    consumed_offset: str
 
 
 class SubagentActivities:
@@ -197,18 +195,18 @@ class SubagentActivities:
         subagent streams into one logical view is a separate CLIENT-side concern (``stream_merge``);
         an activity that gated on a grandchild's ``turn_end`` (a turn it never mounts) would wedge.
         """
-        stream = WorkflowStreamClient.create(self._client, req.child_workflow_id)
         output: dict[str, Any] = {}
         got_reply = False
-        async for item in stream.subscribe(
-            topics=[TURN_EVENTS_TOPIC],
-            from_offset=progress.consumed_offset,
+        async for item in subscribe(
+            self._client,
+            req.child_workflow_id,
+            topic=TURN_EVENTS_TOPIC,
             result_type=AgentEvent,
-            poll_cooldown=timedelta(milliseconds=10),
+            after=progress.consumed_offset,
         ):
-            # Advance the resume offset for EVERY item seen (mutated in place so the background
+            # Advance the resume cursor for EVERY item seen (mutated in place so the background
             # heartbeat re-sends the latest), then act only on our turn's events.
-            progress.consumed_offset = item.offset + 1
+            progress.consumed_offset = item.cursor
             envelope: AgentEvent = item.data
             if envelope.turn_id != progress.turn_id:
                 continue
@@ -329,7 +327,7 @@ class SubagentActivities:
                     workflow_id=req.child_workflow_id,
                     handler=req.type,
                     subagent_turn=progress.turn_number,
-                    # The child stream offset this turn's events begin at (the perf-hint offset
+                    # The child stream cursor this turn's events begin after (the perf-hint cursor
                     # the parent resumed from) — lets a client merging the parent + child streams
                     # mount the child cursor at the right spot when resuming mid-session.
                     from_offset=req.from_offset,

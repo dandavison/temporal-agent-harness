@@ -43,7 +43,7 @@ class MountChild:
     """
 
     workflow_id: str
-    from_offset: int
+    from_offset: str
     subagent_id: str
 
 

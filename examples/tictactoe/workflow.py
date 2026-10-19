@@ -26,7 +26,6 @@ only supplies the judgment of which legal cell to take, over state the code prep
 from __future__ import annotations
 
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 
 with workflow.unsafe.imports_passed_through():
     from temporal_agent_harness.harness import agent
@@ -61,7 +60,6 @@ class TicTacToeAgentWorkflow:
         self._player_name = settings.player_name if settings is not None else None
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # Both tools are marked inherently safe (one reads an API, one writes the agent's
             # own board), so this policy lets a turn flow without a click. Tighten via
             # AgentConfig.approval_policy to approve each judgment and move by hand.

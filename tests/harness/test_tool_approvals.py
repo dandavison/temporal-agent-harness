@@ -1,7 +1,7 @@
 # ABOUTME: End-to-end tests for the safe-by-default, policy-driven human-in-the-loop tool
-# approvals, run against the Temporal time-skipping test server (the only faithful way —
-# the in-workflow approval gate + activity-side publishing only exist when a real workflow
-# + activity execute). Demonstrates docs/internal/human-in-the-loop-tool-approvals.md:
+# approvals, run against a real Temporal server (see tests/utils/stream_env.py; the only
+# faithful way — the in-workflow approval gate + activity-side publishing only exist when a
+# real workflow + activity execute). Demonstrates docs/internal/human-in-the-loop-tool-approvals.md:
 #   * a gated tool runs only AFTER approval (approval_requested -> resolved(approved) ->
 #     tool_start -> tool_end); a denied one never executes (ToolApprovalDenied);
 #   * the agent's ToolApprovalPolicy decides gating, NOT the tool: an inherently_safe tool
@@ -27,15 +27,12 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from datetime import timedelta
 
 import pytest
 import pytest_asyncio
 from temporalio import workflow
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from temporal_agent_harness.harness import AgentWorkflowRunner, agent
@@ -60,6 +57,8 @@ from temporal_agent_harness.harness.agent_protocol import (
     TextReply,
     AgentMessageReply,
 )
+from temporal_agent_harness.harness.streams import subscribe
+from tests.utils.stream_env import start_env
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +175,6 @@ class ApprovalProbeAgent(_BaseProbe):
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # Safe-by-default baseline: gate everything. Tests relax it per session via
             # AgentConfig.approval_policy.
             approval_policy_default=ToolApprovalPolicy.always_require_human_approval(),
@@ -217,7 +215,6 @@ class EvaluatorProbeAgent(_BaseProbe):
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.auto_mode(),
             auto_approval_criteria_default=_EVALUATED,
             auto_mode_evaluator=_approve_gated_activity_tool,
@@ -238,7 +235,6 @@ class VerdictEvaluatorProbeAgent(_BaseProbe):
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.auto_mode(),
             auto_approval_criteria_default=_EVALUATED,
             auto_mode_evaluator=_verdict_evaluator,
@@ -264,7 +260,6 @@ class SlowEvaluatorProbeAgent(_BaseProbe):
         self._evaluator_cancelled = False
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.auto_mode(),
             auto_approval_criteria_default=_EVALUATED,
             auto_mode_evaluator=self._deny_once_released,
@@ -303,7 +298,6 @@ class NonsenseEvaluatorProbeAgent(_BaseProbe):
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.auto_mode(),
             auto_approval_criteria_default=_EVALUATED,
             auto_mode_evaluator=_nonsense_evaluator,
@@ -323,7 +317,6 @@ class BrokenEvaluatorProbeAgent(_BaseProbe):
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.auto_mode(),
             auto_approval_criteria_default=_EVALUATED,
             auto_mode_evaluator=_exploding_evaluator,
@@ -342,9 +335,7 @@ class BrokenEvaluatorProbeAgent(_BaseProbe):
 
 @pytest_asyncio.fixture
 async def env_and_client():
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"approval-test-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -394,13 +385,7 @@ async def _send(handle, text: str) -> AgentMessageReply:
 
 
 def _subscribe(client: Client, workflow_id: str):
-    stream = WorkflowStreamClient.create(client, workflow_id)
-    return stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC],
-        from_offset=0,
-        result_type=AgentEvent,
-        poll_cooldown=timedelta(milliseconds=10),
-    )
+    return subscribe(client, workflow_id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent)
 
 
 async def _drain_to_turn_end(client: Client, workflow_id: str) -> list[AgentEvent]:

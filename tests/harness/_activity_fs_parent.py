@@ -12,7 +12,6 @@ from pathlib import PurePosixPath
 
 from pydantic import BaseModel, JsonValue
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 
 with workflow.unsafe.imports_passed_through():
     from temporal_agent_harness.harness import agent
@@ -128,7 +127,6 @@ class ActivityFsParentWorkflow:
     def __init__(self, config: AgentConfig, data: StoreAgentData) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._run_code = agent.code_mode_tool(

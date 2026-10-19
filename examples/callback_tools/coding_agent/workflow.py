@@ -28,7 +28,6 @@ import json
 from datetime import timedelta
 
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 from temporalio.workflow import ActivityConfig
 
 with workflow.unsafe.imports_passed_through():
@@ -92,7 +91,6 @@ class CodingAgentWorkflow:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # This agent runs real shell commands and edits real files on the user's machine, so
             # every call that touches the machine is gated — the shim turns each gated call into an
             # OpenCode permission prompt. Only tools declared `inherently_safe` are auto-approved;

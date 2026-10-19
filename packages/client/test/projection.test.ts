@@ -169,13 +169,13 @@ test("every subagent in the merged stream gets its own view, linked from the par
   const p = project([
     f.make("message_accepted", { handler: "ask", payload: {}, disposition: "opened" }, root),
     f.make("subagent_started", { subagent_id: "root.s1", agent_key: "researcher", workflow_id: "wf-s1" }, root),
-    f.make("subagent_message_sent", { ...sub, from_offset: 0 }, root),
+    f.make("subagent_message_sent", { ...sub, from_offset: "" }, root),
     // The child's own turn, merged in after the parent asked for it.
     f.make("message_accepted", { handler: "ask", payload: { text: "look it up" }, disposition: "opened" }, child),
     f.make("turn_started", {}, child),
     f.make("reply_delta", { text: "found it" }, child),
     // ...which itself drives a grandchild.
-    f.make("subagent_message_sent", { ...subsub, from_offset: 0 }, child),
+    f.make("subagent_message_sent", { ...subsub, from_offset: "" }, child),
     f.make("message_accepted", { handler: "fetch", payload: {}, disposition: "opened" }, grandchild),
     f.make("message_handler_end", { output: { text: "page" } }, grandchild),
     f.make("subagent_reply_received", { ...subsub, outcome: "ok" }, child),
@@ -221,7 +221,7 @@ test("a stopped subagent, and one whose stream was lost, say so", () => {
   const sub = { subagent_id: "root.s1", agent_key: "helper", workflow_id: "wf-s1", handler: "ask", subagent_turn: 1 };
   const p = project([
     f.make("message_accepted", { handler: "ask", payload: {}, disposition: "opened" }, root),
-    f.make("subagent_message_sent", { ...sub, from_offset: 0 }, root),
+    f.make("subagent_message_sent", { ...sub, from_offset: "" }, root),
     f.make("subagent_stream_unavailable", { subagent_id: "root.s1", workflow_id: "wf-s1", reason: "completed" }, { agent_id: "root.s1" })
   ]);
   const part = p.root!.messages[0]!.parts[0];

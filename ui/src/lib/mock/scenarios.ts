@@ -77,7 +77,7 @@ let resumeOffset = 0;
 function frame<T extends keyof AgentSseEventMap>(
   event: T,
   data: Omit<AgentSseEventMap[T], "agent_id" | "resume_offset"> &
-    { agent_id?: string; resume_offset?: number }
+    { agent_id?: string; resume_offset?: string }
 ): AgentSseFrame {
   const agentId = data.agent_id ?? rootAgentId;
   if (agentId === rootAgentId) resumeOffset += 1;
@@ -90,7 +90,7 @@ function frame<T extends keyof AgentSseEventMap>(
       // message_id: null. Enforced here rather than at every call site, so the mock cannot
       // drift into attributing them to a message.
       ...(event === "turn_started" || event === "turn_end" ? { message_id: null } : {}),
-      resume_offset: data.resume_offset ?? resumeOffset
+      resume_offset: data.resume_offset ?? String(resumeOffset)
     } as AgentSseEventMap[T]
   } as AgentSseFrame;
 }
@@ -779,7 +779,7 @@ const frames: AgentSseFrame[] = [
     workflow_id: searchSubagentWorkflowId,
     handler: "summarize_budget_examples",
     subagent_turn: 1,
-    from_offset: 0
+    from_offset: ""
   }),
   frame("message_accepted", {
     type: "message_accepted",

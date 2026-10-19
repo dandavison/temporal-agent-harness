@@ -36,7 +36,6 @@ import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 from temporalio.workflow import ActivityConfig
 
 with workflow.unsafe.imports_passed_through():
@@ -108,7 +107,6 @@ class MontyChatSubagentWorkflow:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # Gate the subagent tools: every start_monty / monty_run_script / stop_monty call
             # escalates to a human (same stance as the inline MontyChatAgent). The script's
             # host calls run inside the child, which has its own dangerously_skip_all policy.

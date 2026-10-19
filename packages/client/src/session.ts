@@ -102,7 +102,7 @@ export class AgentSessionCore<A extends AgentSchema = UntypedAgent> {
   readonly #dispatchedCalls = new Set<string>();
   #buffer: AgentSseFrame[] = [];
   #flushScheduled = false;
-  #resumeOffset = 0;
+  #resumeOffset = "";
   #observed = false;
   #run: AbortController | null = null;
   #wake: (() => void) | null = null;
@@ -350,12 +350,12 @@ export class AgentSessionCore<A extends AgentSchema = UntypedAgent> {
   // -- frames ----------------------------------------------------------------
 
   #receive(frame: AgentSseFrame): void {
-    // A re-attach resumes from a root-stream offset that several subagent frames share, so
+    // A re-attach resumes from a root-stream cursor that several subagent frames share, so
     // some frames arrive twice.
     const key = frameKey(frame);
     if (this.#frameKeys.has(key)) return;
     this.#frameKeys.add(key);
-    this.#resumeOffset = Math.max(this.#resumeOffset, frame.data.resume_offset);
+    this.#resumeOffset = frame.data.resume_offset;
     this.#buffer.push(frame);
     this.#projection.apply(frame);
     this.#scheduleFlush();

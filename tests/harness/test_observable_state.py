@@ -4,8 +4,9 @@
 # without the author asking, that the ops are stamped with the turn they happened in, and
 # that replaying the stream reproduces the agent's state exactly.
 #
-# Run end-to-end against the Temporal time-skipping test server, because the thing under
-# test is precisely that these events survive the workflow -> stream -> client round trip.
+# Run end-to-end against a real Temporal server (see tests/utils/stream_env.py), because the
+# thing under test is precisely that these events survive the workflow -> stream -> client
+# round trip.
 #
 # The last section runs the state layer under the DEFAULT (sandboxed) workflow runner, which
 # the agent tests above deliberately do not: `mutate()` generates a `Draft[C]` class with
@@ -18,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import gc
 import uuid
-from datetime import timedelta
 from typing import Any
 
 from temporalio import workflow
@@ -33,8 +33,6 @@ with workflow.unsafe.imports_passed_through():
     import pytest_asyncio
     from temporalio.client import Client, WorkflowHandle
     from temporalio.contrib.pydantic import pydantic_data_converter
-    from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamClient
-    from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
     from temporal_agent_harness.harness import agent
@@ -53,6 +51,8 @@ with workflow.unsafe.imports_passed_through():
     from temporal_agent_harness.harness.agent_workflow import AgentWorkflowRunner
     from temporal_agent_harness.harness.state import HarnessState, StateRef
     from temporal_agent_harness.harness.state import drafts as _drafts
+    from temporal_agent_harness.harness.streams import BEGINNING, subscribe
+    from tests.utils.stream_env import start_env
 
 # ---------------------------------------------------------------------------
 # An author's state, and an agent that opts in
@@ -80,7 +80,6 @@ class StateProbeAgent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
 
@@ -117,7 +116,6 @@ class EarlyStateProbeAgent:
             d.goal = "set before the runner existed"
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
 
@@ -136,9 +134,7 @@ class EarlyStateProbeAgent:
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"observable-state-test-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -174,14 +170,10 @@ async def _run_turn(
 
 
 async def _collect(client: Client, workflow_id: str) -> list[AgentEvent]:
-    stream = WorkflowStreamClient.create(client, workflow_id)
     events: list[AgentEvent] = []
     async with asyncio.timeout(60):
-        async for item in stream.subscribe(
-            topics=["turn_events"],
-            from_offset=0,
-            result_type=AgentEvent,
-            poll_cooldown=timedelta(milliseconds=10),
+        async for item in subscribe(
+            client, workflow_id, topic="turn_events", result_type=AgentEvent
         ):
             events.append(item.data)
             if item.data.event.type == AgentEventType.TURN_END:
@@ -335,7 +327,7 @@ async def test_attach_to_a_brand_new_session_delivers_the_snapshot_and_stops(
 
     `should_stop` would only ask whether the workflow was idle on a *terminal* root event --
     a `turn_end`, or an operator command's terminal -- and a `state_snapshot` is neither. So
-    the moment registering state put an event at offset 0, attach delivered it and then
+    the moment registering state put the stream's first event, attach delivered it and then
     blocked forever waiting for a `turn_end` that could not arrive until somebody sent a
     message.
 
@@ -357,8 +349,8 @@ async def test_attach_to_a_brand_new_session_delivers_the_snapshot_and_stops(
     agent_client = AgentClient(client, handle.id)
 
     stream = await agent_client.attach(
-        from_offset=0,
-        on_item=lambda item, _resume_offset: item,
+        from_offset=BEGINNING,
+        on_item=lambda item, _resume_cursor: item,
     )
     items: list[AgentEvent] = []
     async with asyncio.timeout(10):
@@ -430,9 +422,7 @@ class SandboxStateProbe:
 @pytest_asyncio.fixture
 async def sandboxed_queue():
     """A worker on the DEFAULT workflow runner — i.e. the real sandbox."""
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"sandboxed-state-test-{uuid.uuid4()}"
     async with Worker(env.client, task_queue=task_queue, workflows=[SandboxStateProbe]):
         try:
@@ -534,9 +524,7 @@ async def test_the_draft_class_cache_does_not_grow_per_workflow_instance():
     afterwards the only classes left alive are ones something retained. A retained
     class per run shows up as `runs` times the drafts per instance.
     """
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     try:
         before = _live_draft_classes()
 

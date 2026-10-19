@@ -93,3 +93,27 @@ development, `just ui-dev` runs Vite at <http://127.0.0.1:5173> with `/api`
 proxied to the same FastAPI server.
 
 `just` lists every recipe; `just config` shows the Temporal connection currently in use.
+
+## Streams prototype
+
+On this branch the agents' event streams use `temporalio.streams` instead of
+`temporalio.contrib.workflow_streams`. That needs the prototype server and SDK from the
+`internal-ai-prototypes-dan` superproject, which contains this repo as a submodule:
+
+- Run the superproject's `dev-server` instead of `just temporal`. It serves localhost:7233, which
+  `temporal.local.toml` already targets.
+- This repo's `pyproject.toml` takes `temporalio` from the superproject's `sdk-python` checkout.
+
+`TEMPORAL_AGENT_STREAM_BACKEND` chooses where streams are stored. Set it to the same value for
+every process (session manager, server, worker):
+
+| Value | Storage |
+|-|-|
+| `native` (default) | the Temporal server; the worker appends a workflow's records after each activation |
+| `native-commit` | the Temporal server; the records travel in the workflow task completion |
+| `redis` | Redis at `TEMPORAL_AGENT_STREAM_REDIS_URL` |
+
+`native` does not work with these agents. They receive every message as an Update. An Update
+sent to an idle workflow runs in a speculative workflow task, and the native backend rejects
+appends from speculative workflow tasks, so the task fails and the Update is aborted. Use
+`native-commit` or `redis`.

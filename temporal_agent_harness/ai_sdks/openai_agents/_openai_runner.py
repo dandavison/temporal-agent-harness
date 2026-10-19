@@ -302,7 +302,7 @@ class TemporalOpenAIRunner(AgentRunner):
             raise AgentsWorkflowError(
                 "Runner.run_streamed is incompatible with "
                 "use_local_activity (local activities do not support "
-                "heartbeats or the workflow stream signal channel)."
+                "heartbeats)."
             )
 
         converted_agent = self._prepare_workflow_run(starting_agent, kwargs)

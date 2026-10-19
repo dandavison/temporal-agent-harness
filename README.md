@@ -413,7 +413,6 @@ with lookups auto-approved and bookings still coming to you.
 from datetime import timedelta
 
 from pydantic import BaseModel
-from temporalio.contrib.workflow_streams import WorkflowStream
 from temporalio.workflow import ActivityConfig
 
 from temporal_agent_harness.harness import AgentWorkflowRunner, agent
@@ -459,7 +458,6 @@ class TravelAgent:
         # statically declare themselves inherently safe.
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.allow_inherently_safe(),
         )
         # Optional, so a caller may start it without a profile. Declare it without the
@@ -819,7 +817,6 @@ class TicTacToeAgentWorkflow:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.allow_inherently_safe(),
         )
         self._sdk_agent = Agent(

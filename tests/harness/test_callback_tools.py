@@ -1,7 +1,7 @@
 # ABOUTME: End-to-end tests for callback tools — tools with no worker-side body that an
-# EXTERNAL client fulfills on its own machine, run against the Temporal time-skipping test
-# server (the only faithful way — the in-workflow wait gate + the provide_callback_result
-# update only exist when a real workflow executes). Demonstrates:
+# EXTERNAL client fulfills on its own machine, run against a real Temporal server (see
+# tests/utils/stream_env.py; the only faithful way — the in-workflow wait gate + the
+# provide_callback_result update only exist when a real workflow executes). Demonstrates:
 #   * a callback tool publishes tool_start -> callback_requested, parks until the client
 #     provides a result, then callback_resolved(ok) -> tool_end, returning the validated value;
 #   * a callback tool gets EXACTLY the same approval policy as any other tool — under
@@ -28,8 +28,6 @@ from pydantic import BaseModel
 from temporalio import workflow
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from temporal_agent_harness.harness import AgentWorkflowRunner, agent
@@ -49,6 +47,8 @@ from temporal_agent_harness.harness.agent_protocol import (
     TextMessage,
     TextReply,
 )
+from temporal_agent_harness.harness.streams import subscribe
+from tests.utils.stream_env import start_env
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,6 @@ class CallbackProbeAgent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # Default: no gate, so the callback mechanics are isolated. The gating-parity test
             # overrides this per session via AgentConfig.approval_policy.
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
@@ -132,9 +131,7 @@ class CallbackProbeAgent:
 
 @pytest_asyncio.fixture
 async def env_and_client():
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"callback-test-{uuid.uuid4()}"
     # Callback tools are inline (tool_defn) — no activities to register.
     async with Worker(
@@ -169,13 +166,7 @@ async def _send(handle, text: str) -> None:
 
 
 def _subscribe(client: Client, workflow_id: str):
-    stream = WorkflowStreamClient.create(client, workflow_id)
-    return stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC],
-        from_offset=0,
-        result_type=AgentEvent,
-        poll_cooldown=timedelta(milliseconds=10),
-    )
+    return subscribe(client, workflow_id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent)
 
 
 async def _drain_to_turn_end(client: Client, workflow_id: str) -> list[AgentEvent]:
@@ -412,7 +403,7 @@ async def test_client_reported_error_surfaces_to_model(env_and_client):
 
 async def test_unfulfilled_callback_times_out(env_and_client):
     """With a timeout and no result, the wait elapses: callback_resolved(timeout) -> tool_error
-    (the time-skipping server advances to the timer)."""
+    (the 5s timer elapses in real time)."""
     client, task_queue = env_and_client
     handle = await _start(client, task_queue)
     await _send(handle, "timeout")

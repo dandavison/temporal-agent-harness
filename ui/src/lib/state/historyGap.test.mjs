@@ -33,7 +33,7 @@ function frame(event, offset, data = {}, agentId = ROOT, turnNumber = 1) {
       turn_id: `${agentId}-t${turnNumber}`,
       timestamp: (clock += 1),
       event_offset: offset,
-      resume_offset: offset + 1,
+      resume_offset: `c${offset + 1}`,
       ...data
     }
   };
@@ -222,7 +222,7 @@ describe("frames outside the root's offset space must not manufacture one", () =
         workflow_id: "wf-child",
         function: "task_ask",
         subagent_turn: 1,
-        from_offset: 0
+        from_offset: ""
       }),
       modelStart(400, 1, CHILD),
       modelEnd(401, 1, CHILD),
@@ -268,8 +268,8 @@ describe("frames outside the root's offset space must not manufacture one", () =
     // `event_offset` (and every mock fixture) carries no such field.
     const offsetless = [
       delta(20),
-      { event: "stream_error", data: { kind: "timeout", message: "gave up", resume_offset: 21 } },
-      { event: "reply_delta", data: { type: "reply_delta", agent_id: ROOT, turn_number: 1, turn_id: "t", timestamp: 1, resume_offset: 22, text: "x" } },
+      { event: "stream_error", data: { kind: "timeout", message: "gave up", resume_offset: "c21" } },
+      { event: "reply_delta", data: { type: "reply_delta", agent_id: ROOT, turn_number: 1, turn_id: "t", timestamp: 1, resume_offset: "c22", text: "x" } },
       delta(21)
     ];
     assert.deepEqual(

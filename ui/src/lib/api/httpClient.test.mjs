@@ -123,3 +123,17 @@ describe("viewing a mounted file", () => {
     assert.equal(error.code, "file_view_unavailable");
   });
 });
+
+describe("attaching", () => {
+  it("sends the resume cursor URL-encoded", async () => {
+    let url = null;
+    globalThis.fetch = async (requested) => {
+      url = String(requested);
+      return new Response("", { status: 200 });
+    };
+    for await (const _ of new HttpAgentApi().attach("wf/1", "AAAAAAAAAAc=")) {
+      assert.fail("an empty body carries no frames");
+    }
+    assert.equal(url, "api/attach?session_id=wf%2F1&from_offset=AAAAAAAAAAc%3D");
+  });
+});

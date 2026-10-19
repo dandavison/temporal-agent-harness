@@ -80,7 +80,7 @@ const frame = (offset) => ({
     turn_number: 1,
     message_id: MESSAGE_ID,
     timestamp: offset,
-    resume_offset: offset + 1,
+    resume_offset: `c${offset + 1}`,
     event_offset: offset,
     delta: `#${offset} `,
     replay: true
@@ -99,7 +99,7 @@ const handlerEnd = (offset) => ({
     turn_number: 1,
     message_id: MESSAGE_ID,
     timestamp: offset,
-    resume_offset: offset + 1,
+    resume_offset: `c${offset + 1}`,
     event_offset: offset,
     output: { text: "done" },
     replay: true
@@ -119,7 +119,6 @@ function boot({ sessions, streamFor, statusFor, listSessionsFor = async () => []
         turn_number: 1,
         turn_id: "t1",
         message_id: MESSAGE_ID,
-        accepted_offset: 0,
         disposition: "opened"
       };
     },
@@ -256,8 +255,8 @@ describe("a caught-up attach", () => {
     await waitFor("a re-attach after a genuine drop", () => attachCalls.length === 2, 6_000);
     assert.equal(
       attachCalls[1].fromOffset,
-      3,
-      "a reconnect must resume from the last offset the server sent"
+      "c3",
+      "a reconnect must resume from the last cursor the server sent"
     );
     assert.equal(controller.frames.length, 3, "the delivered frames must reach the view");
   });

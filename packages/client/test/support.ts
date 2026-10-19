@@ -15,7 +15,7 @@ export interface Envelope {
   turn_number?: number;
 }
 
-/** Builds frames with increasing timestamps and resume offsets. */
+/** Builds frames with increasing timestamps and distinct resume cursors `c1`, `c2`, .... */
 export class Frames {
   #time = 0;
   #offset = 0;
@@ -31,7 +31,7 @@ export class Frames {
         turn_number: turn,
         message_id: env.message_id ?? null,
         timestamp: ++this.#time,
-        resume_offset: ++this.#offset,
+        resume_offset: `c${++this.#offset}`,
         ...data
       }
     } as unknown as AgentSseFrame;
@@ -56,7 +56,7 @@ type Step = AgentSseFrame | Error | { hold: Promise<void> };
 /** A transport whose attaches play back scripts, one per call, in order. A script that runs out
  *  ends the attach; an `Error` step throws; a `hold` step waits until released. */
 export class ScriptedTransport implements SessionTransport {
-  readonly attaches: number[] = [];
+  readonly attaches: string[] = [];
   readonly submitted: Array<{ type: string; payload: unknown }> = [];
   readonly callbackResults: Array<{ toolId: string; outcome: unknown }> = [];
   readonly approvals: Array<{ toolId: string; decision: ToolApprovalDecision }> = [];
@@ -69,7 +69,6 @@ export class ScriptedTransport implements SessionTransport {
     turn_number: n,
     turn_id: `turn-${n}`,
     message_id: `m${n}`,
-    accepted_offset: 0,
     disposition: "opened"
   });
 
@@ -81,7 +80,7 @@ export class ScriptedTransport implements SessionTransport {
     this.#scripts.push(steps);
   }
 
-  async *attach(_sessionId: string, fromOffset: number, signal: AbortSignal): AsyncIterable<AgentSseFrame> {
+  async *attach(_sessionId: string, fromOffset: string, signal: AbortSignal): AsyncIterable<AgentSseFrame> {
     this.attaches.push(fromOffset);
     const steps = this.#scripts.shift() ?? [];
     for (const step of steps) {

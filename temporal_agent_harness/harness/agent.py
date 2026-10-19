@@ -16,7 +16,7 @@
 #     class MyAgent:
 #         @agent.init
 #         def __init__(self, config: AgentConfig) -> None:
-#             self._runner = AgentWorkflowRunner(config, stream=WorkflowStream(), ...)
+#             self._runner = AgentWorkflowRunner(config, ...)
 #
 #         @agent.setup      # optional: awaited once, before the first message
 #         async def setup(self) -> None: ...

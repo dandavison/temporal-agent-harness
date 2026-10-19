@@ -15,7 +15,6 @@ from datetime import timedelta
 from pathlib import PurePosixPath
 
 from temporalio import activity, workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 from temporalio.exceptions import ApplicationError
 
 with workflow.unsafe.imports_passed_through():
@@ -107,7 +106,6 @@ class CodeModeVfsE2EParentWorkflow:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._run_code = agent.code_mode_tool(

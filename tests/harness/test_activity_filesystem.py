@@ -16,9 +16,8 @@ import pytest_asyncio
 from pydantic import BaseModel
 from temporalio.client import Client, WorkflowHandle
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
+from temporalio.testing import ActivityEnvironment
 from temporalio.worker import Replayer, Worker
 
 from temporal_agent_harness.harness import agent
@@ -40,7 +39,9 @@ from temporal_agent_harness.harness.code_mode.activity_fs import (
     FsWrite,
 )
 from temporal_agent_harness.harness.code_mode.vfs import IndexSource
+from temporal_agent_harness.harness.streams import BEGINNING, subscribe
 from temporal_agent_harness.plugin import AgentHarnessPlugin
+from tests.utils.stream_env import start_env
 
 from _activity_fs_parent import (
     STORES,
@@ -204,7 +205,7 @@ async def test_view_pages_through_a_file(store):
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter)
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"activity-fs-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -224,9 +225,8 @@ async def _send(client: Client, handle: WorkflowHandle[Any, Any], script: str) -
         AgentMessage(type="run_code", payload={"script": script}),
         result_type=AgentMessageReply,
     )
-    stream = WorkflowStreamClient.create(client, handle.id)
-    async for item in stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC], from_offset=0, result_type=AgentEvent
+    async for item in subscribe(
+        client, handle.id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
     ):
         envelope: AgentEvent = item.data
         if (
@@ -282,11 +282,10 @@ async def test_a_mounted_activity_filesystem_is_indexed(client_and_queue, store)
 
 async def _first_turn(client: Client, handle: WorkflowHandle[Any, Any]) -> list[AgentEvent]:
     """Every event the agent published up to the end of its first turn."""
-    stream = WorkflowStreamClient.create(client, handle.id)
     events: list[AgentEvent] = []
     async with asyncio.timeout(10):
-        async for item in stream.subscribe(
-            topics=[TURN_EVENTS_TOPIC], from_offset=0, result_type=AgentEvent
+        async for item in subscribe(
+            client, handle.id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
         ):
             events.append(item.data)
             if item.data.event.type == AgentEventType.TURN_END:
@@ -309,7 +308,7 @@ async def test_a_new_session_with_a_declared_mount_publishes_only_its_snapshot(
     )
 
     stream = await AgentClient(client, handle.id).attach(
-        from_offset=0, on_item=lambda item, _resume_offset: item
+        from_offset=BEGINNING, on_item=lambda item, _resume_cursor: item
     )
     items: list[AgentEvent] = []
     async with asyncio.timeout(10):

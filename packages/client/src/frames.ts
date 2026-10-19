@@ -16,9 +16,10 @@ export type MessageDisposition = Protocol.MessageDisposition;
 export type AutoApprovalVerdict = Protocol.AutoApprovalVerdict;
 
 export interface AgentEventMetadata extends Omit<Protocol.AgentEvent, "event"> {
-  /** The root-stream position to resume from: pass it back as `from_offset`. Several
-   *  subagent frames can share one, so it is a cursor, not an identity. */
-  resume_offset: number;
+  /** The root-stream position to resume from: pass it back as `from_offset`. An opaque
+   *  cursor, comparable only for equality. Several subagent frames can share one, so it is
+   *  not an identity. */
+  resume_offset: string;
   /** The event's own offset in its agent's log, when the server reports one. */
   event_offset?: number;
   /** Present, and true, when the event was already durable as the stream opened. */
@@ -89,7 +90,7 @@ export interface JsonPatchOp {
 export interface ClientSideStreamErrorEvent {
   kind: "timeout" | "agent";
   message: string;
-  resume_offset: number;
+  resume_offset: string;
 }
 
 export type AgentSseEventMap = { [TType in AgentEventType]: AgentEventData<TType> } & {

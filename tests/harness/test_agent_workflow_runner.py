@@ -3,11 +3,11 @@
 # by `type` to the matching handler (reconstructing its input model, rejecting an unknown
 # function or a malformed payload at the update boundary), that the handler's return value
 # is published as the reply, that the agent_interface query announces the callable surface,
-# and that the runner resolves config-vs-agent-default knobs (with stream + approval policy
+# and that the runner resolves config-vs-agent-default knobs (with the approval policy
 # required).
 #
 # The accept/reject/dispatch behavior is exercised end-to-end through real updates against
-# the Temporal time-skipping test server (the only faithful way — routing lives in the
+# the stream prototype's server (see tests/utils/stream_env.py; the only faithful way — routing lives in the
 # update validator + run loop, which run in a workflow context). The discovery/validation
 # and config-resolution checks are plain unit tests.
 #
@@ -34,8 +34,6 @@ from temporalio.client import (
     WorkflowUpdateFailedError,
 )
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStream
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from temporal_agent_harness.harness import AgentWorkflowRunner, agent
@@ -77,6 +75,8 @@ from temporal_agent_harness.harness.agent_workflow import (
     agent_init_data,
 )
 from temporal_agent_harness.harness.stream_context import TurnStreamContext
+from temporal_agent_harness.harness.streams import subscribe
+from tests.utils.stream_env import start_env
 
 
 def _ctx(tool_name: str, **kwargs) -> AutoApprovalContext:
@@ -155,7 +155,6 @@ class TypedProbeAgent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._seen: list[str] = []
@@ -192,7 +191,6 @@ class NoEvaluatorProbeAgent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.allow_tools(["get_order"]),
         )
         self._seen: list[str] = []
@@ -225,7 +223,6 @@ class MidTurnProbeAgent:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._released: set[str] = set()
@@ -285,7 +282,6 @@ class LifecycleProbeAgent:
     def __init__(self, config: AgentConfig, data: TripData | None = None) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._data = data
@@ -314,10 +310,8 @@ class LifecycleProbeAgent:
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    """A time-skipping env (pydantic converter) with a worker hosting the probe."""
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    """A client of the shared server (pydantic converter) with a worker hosting the probe."""
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"agent-workflow-runner-test-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -434,16 +428,7 @@ async def test_agent_interface_query_announces_handlers(client_and_queue):
 
 def _subscribe_all(client: Client, workflow_id: str):
     """Subscribe to a workflow's whole event log from the start (live-tailing)."""
-    from datetime import timedelta
-
-    from temporalio.contrib.workflow_streams import WorkflowStreamClient
-
-    return WorkflowStreamClient.create(client, workflow_id).subscribe(
-        topics=["turn_events"],
-        from_offset=0,
-        result_type=AgentEvent,
-        poll_cooldown=timedelta(milliseconds=10),
-    )
+    return subscribe(client, workflow_id, topic="turn_events", result_type=AgentEvent)
 
 
 async def _collect_until_turn_end(client: Client, workflow_id: str) -> list[AgentEvent]:
@@ -886,21 +871,13 @@ def test_a_tool_call_closed_after_eviction_unwinds_quietly():
     call.close()  # closed from this one; raises if the unwind does anything but exit
 
 
-def test_stream_and_approval_policy_default_are_required():
-    """``stream`` and ``approval_policy_default`` are required keyword-only constructor
-    args, so omitting either is a call-site TypeError — no runtime ``build()`` check to
-    forget. The author must make a deliberate safe-by-default approval choice."""
-    stream = MagicMock()
-    stream.topic.return_value = MagicMock()
-    with pytest.raises(TypeError):
-        AgentWorkflowRunner(  # type: ignore[call-arg]  — missing stream
-            AgentConfig(),
-            approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
-        )
+def test_approval_policy_default_is_required():
+    """``approval_policy_default`` is a required keyword-only constructor arg, so omitting it
+    is a call-site TypeError — no runtime ``build()`` check to forget. The author must make a
+    deliberate safe-by-default approval choice."""
     with pytest.raises(TypeError):
         AgentWorkflowRunner(  # type: ignore[call-arg]  — missing approval_policy_default
             AgentConfig(),
-            stream=stream,
         )
 
 
@@ -1505,7 +1482,9 @@ def test_errored_subagent_turn_closes_bracket_on_actual_accepted_turn(offline_bu
         inst, "run_script", accepted, outcome="error"
     )
 
-    published = [c.args[0] for c in runner._events.publish.call_args_list]
+    import temporal_agent_harness.harness.agent_workflow as aw
+
+    published = [c.args[0] for c in aw.workflow_append.call_args_list]
     replies = [e for e in published if isinstance(e.event, SubagentReplyReceived)]
     assert len(replies) == 1
     rr = replies[0].event
@@ -1541,12 +1520,11 @@ def offline_build(monkeypatch):
     # no workflow loop, so stub it with a plain uuid.
     monkeypatch.setattr(aw.workflow, "uuid4", lambda: uuid.uuid4())
 
+    monkeypatch.setattr(aw, "workflow_append", MagicMock())
+
     def build(config: AgentConfig):
-        stream = MagicMock()
-        stream.topic.return_value = MagicMock()
         return AgentWorkflowRunner(
             config,
-            stream=stream,
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
 
@@ -1563,6 +1541,7 @@ def offline_build_policy(monkeypatch):
     # The runner generates its short agent_id from workflow.uuid4() in __init__; offline there is
     # no workflow loop, so stub it with a plain uuid.
     monkeypatch.setattr(aw.workflow, "uuid4", lambda: uuid.uuid4())
+    monkeypatch.setattr(aw, "workflow_append", MagicMock())
 
     def build(
         config: AgentConfig,
@@ -1571,11 +1550,8 @@ def offline_build_policy(monkeypatch):
         auto_mode_evaluator=None,
         auto_approval_criteria=None,
     ):
-        stream = MagicMock()
-        stream.topic.return_value = MagicMock()
         return AgentWorkflowRunner(
             config,
-            stream=stream,
             approval_policy_default=default,
             auto_approval_criteria_default=auto_approval_criteria,
             auto_mode_evaluator=auto_mode_evaluator,
@@ -1849,7 +1825,7 @@ async def test_message_context_distinguishes_joining_from_opening(client_and_que
 async def test_send_message_fast_fails_on_a_join_instead_of_hanging(client_and_queue):
     """``send_message`` is one message → one turn → one stream, and says so immediately.
 
-    A joining message has its turn's ``turn_started`` BEHIND its ``accepted_offset``, so the
+    A joining message has its turn's ``turn_started`` BEHIND the stream head read before sending, so the
     merge's skip preamble never matches and the caller would sit in silence until the turn
     timeout (300s) for a single ``AgentTurnTimeout``. The reply's ``disposition`` makes that
     knowable at submit time, so it raises instead — and the message is still running, which is

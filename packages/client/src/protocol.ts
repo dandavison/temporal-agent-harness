@@ -459,9 +459,9 @@ export interface SubagentMessageSent {
    */
   subagent_turn: number;
   /**
-   * The offset in the SUBAGENT's OWN stream at which this turn's events begin (the child stream position the parent resumes consumption from for this turn). A client merging the parent + subagent streams positions the child cursor here the first time it mounts the child — so a merge that starts mid-session (resuming at a parent turn that is not the child's first) skips the child's pre-resume history, whose own message_sent markers are not on the merged stream and could otherwise never be ordered. Unrelated address space from the parent stream's offsets.
+   * The cursor in the SUBAGENT's OWN stream after which this turn's events begin (the child stream position the parent resumes consumption from for this turn). A client merging the parent + subagent streams positions the child cursor here the first time it mounts the child — so a merge that starts mid-session (resuming at a parent turn that is not the child's first) skips the child's pre-resume history, whose own message_sent markers are not on the merged stream and could otherwise never be ordered. Unrelated address space from the parent stream's cursors. Empty means the stream's beginning.
    */
-  from_offset: number;
+  from_offset: string;
 }
 /**
  * This agent received a subagent's reply for one turn it dispatched.

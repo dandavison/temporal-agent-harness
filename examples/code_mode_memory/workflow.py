@@ -28,7 +28,6 @@ from pathlib import PurePosixPath
 
 from pydantic import BaseModel, Field
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 from temporalio.workflow import ActivityConfig
 
 with workflow.unsafe.imports_passed_through():
@@ -104,7 +103,6 @@ class CodeModeMemoryAgentWorkflow:
     def __init__(self, config: AgentConfig, data: MemoryConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             # Every file operation is a tool call; approving each one would be a click per read.
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )

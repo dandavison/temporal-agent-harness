@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 
 with workflow.unsafe.imports_passed_through():
     from temporal_agent_harness.harness import agent
@@ -31,7 +30,6 @@ class EchoStepAgentWorkflow:
         self.profile.set(StepProfile.model_validate(spec.model_dump()))
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
 

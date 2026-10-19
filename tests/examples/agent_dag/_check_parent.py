@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from temporalio import workflow
-from temporalio.contrib.workflow_streams import WorkflowStream
 
 with workflow.unsafe.imports_passed_through():
     from temporal_agent_harness.harness import agent
@@ -26,7 +25,6 @@ class CheckCodeParentWorkflow:
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.allow_inherently_safe(),
         )
         self._run_flow = agent.code_mode_tool(

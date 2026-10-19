@@ -1,6 +1,6 @@
 # ABOUTME: End-to-end tests that an MCP tool call gets the same governance as any other
-# harness tool. Run against the Temporal time-skipping test server, because the approval
-# gate and the turn stream only exist in a real workflow. The SDK calls
+# harness tool. Run against a real Temporal server (see tests/utils/stream_env.py),
+# because the approval gate and the turn stream only exist in a real workflow. The SDK calls
 # MCPServer.call_tool directly, never run_tool, so as_harness_mcp_server takes the
 # runner and funnels the call through it.
 #
@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import timedelta
 from typing import Any, cast
 
 import pytest
@@ -28,8 +27,6 @@ from mcp import types
 from temporalio import workflow
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from temporal_agent_harness.ai_sdks.openai_agents_harness import as_harness_mcp_server
@@ -47,6 +44,8 @@ from temporal_agent_harness.harness.agent_protocol import (
     TextMessage,
     TextReply,
 )
+from temporal_agent_harness.harness.streams import subscribe
+from tests.utils.stream_env import start_env
 
 CALL_ID = "call_mcp_1"
 TOOL_NAME = "probe_mcp_tool"
@@ -114,7 +113,6 @@ class GatedMCPProbeAgent(_BaseMCPProbe):
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.always_require_human_approval(),
         )
         self._server_calls: list[Any] = []
@@ -133,7 +131,6 @@ class UngatedMCPProbeAgent(_BaseMCPProbe):
     def __init__(self, config: AgentConfig) -> None:
         self._runner = AgentWorkflowRunner(
             config,
-            stream=WorkflowStream(),
             approval_policy_default=ToolApprovalPolicy.dangerously_skip_all(),
         )
         self._server_calls: list[Any] = []
@@ -145,9 +142,7 @@ class UngatedMCPProbeAgent(_BaseMCPProbe):
 
 @pytest_asyncio.fixture
 async def env_and_client():
-    env = await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
-    )
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"mcp-governance-test-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -179,13 +174,7 @@ async def _send(handle, text: str) -> None:
 
 
 def _subscribe(client: Client, workflow_id: str):
-    stream = WorkflowStreamClient.create(client, workflow_id)
-    return stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC],
-        from_offset=0,
-        result_type=AgentEvent,
-        poll_cooldown=timedelta(milliseconds=10),
-    )
+    return subscribe(client, workflow_id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent)
 
 
 def _types_for(events: list[AgentEvent], tool_id: str) -> list[str]:

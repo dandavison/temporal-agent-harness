@@ -13,8 +13,6 @@ import uuid
 import pytest_asyncio
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from examples.agent_dag.workflow import DagBuilderAgentWorkflow
@@ -27,7 +25,9 @@ from temporal_agent_harness.harness.agent_protocol import (
     AgentMessage,
     AgentMessageReply,
 )
+from temporal_agent_harness.harness.streams import subscribe
 from temporal_agent_harness.plugin import AgentHarnessPlugin
+from tests.utils.stream_env import start_env
 
 from ._echo_step_agent import EchoStepAgentWorkflow
 
@@ -55,7 +55,7 @@ asyncio.run(main())
 
 @pytest_asyncio.fixture
 async def client_and_queue():
-    env = await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter)
+    env = await start_env(data_converter=pydantic_data_converter)
     task_queue = f"agent-dag-{uuid.uuid4()}"
     async with Worker(
         env.client,
@@ -70,10 +70,9 @@ async def client_and_queue():
 
 
 async def _events(client: Client, workflow_id: str) -> list[AgentEvent]:
-    stream = WorkflowStreamClient.create(client, workflow_id)
     events: list[AgentEvent] = []
-    async for item in stream.subscribe(
-        topics=[TURN_EVENTS_TOPIC], from_offset=0, result_type=AgentEvent
+    async for item in subscribe(
+        client, workflow_id, topic=TURN_EVENTS_TOPIC, result_type=AgentEvent
     ):
         events.append(item.data)
         if item.data.event.type == AgentEventType.TURN_END:

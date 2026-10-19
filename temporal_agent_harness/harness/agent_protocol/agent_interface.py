@@ -875,22 +875,12 @@ class AgentMessageReply:
     behind it (see :class:`MessageDisposition`). It is what a caller needs to decide how to
     observe the work: only ``OPENED`` gets a turn of its own to stream, which is the
     precondition :meth:`AgentClient.send_message` enforces.
-
-    ``accepted_offset`` is the agent's stream offset captured at the instant the update was
-    accepted (the log head BEFORE this turn publishes anything). It is internal plumbing for the
-    client's stream-merge: a caller starts reading the merged logical stream from here and
-    discards events until this turn's ``turn_started`` — a quiescent point with no in-flight
-    subagent brackets. It is a read-start *hint* (its only requirement is to be ``<=`` this
-    turn's ``turn_started`` offset, which capture-at-acceptance guarantees); the BFF/UI never
-    sees or stores it. For a queued message it is the head mid the active prior turn; the
-    skip-to-``turn_started`` preamble normalizes that.
     """
 
     turn_number: int
     turn_id: str
     message_id: str
     disposition: MessageDisposition
-    accepted_offset: int = 0
 
 
 @dataclass
