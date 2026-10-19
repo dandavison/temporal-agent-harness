@@ -1484,7 +1484,7 @@ def test_errored_subagent_turn_closes_bracket_on_actual_accepted_turn(offline_bu
 
     import temporal_agent_harness.harness.agent_workflow as aw
 
-    published = [c.args[0] for c in aw.workflow_append.call_args_list]
+    published = [c.args[0] for c in aw.workflow.stream().publish.call_args_list]
     replies = [e for e in published if isinstance(e.event, SubagentReplyReceived)]
     assert len(replies) == 1
     rr = replies[0].event
@@ -1520,7 +1520,7 @@ def offline_build(monkeypatch):
     # no workflow loop, so stub it with a plain uuid.
     monkeypatch.setattr(aw.workflow, "uuid4", lambda: uuid.uuid4())
 
-    monkeypatch.setattr(aw, "workflow_append", MagicMock())
+    monkeypatch.setattr(aw.workflow, "stream", MagicMock())
 
     def build(config: AgentConfig):
         return AgentWorkflowRunner(
@@ -1541,7 +1541,7 @@ def offline_build_policy(monkeypatch):
     # The runner generates its short agent_id from workflow.uuid4() in __init__; offline there is
     # no workflow loop, so stub it with a plain uuid.
     monkeypatch.setattr(aw.workflow, "uuid4", lambda: uuid.uuid4())
-    monkeypatch.setattr(aw, "workflow_append", MagicMock())
+    monkeypatch.setattr(aw.workflow, "stream", MagicMock())
 
     def build(
         config: AgentConfig,

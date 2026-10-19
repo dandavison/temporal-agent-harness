@@ -4,23 +4,31 @@
 # ``TEMPORAL_ADDRESS`` (default localhost:7233): native streams are stored there, and the Redis
 # backend needs the attempt stamps it sets. Redis needs ``redis-server`` on PATH.
 #
+# Commit mode is declared by a workflow definition, ``@workflow.defn(stream_commit_mode=True)``,
+# not chosen by a backend. So that one suite runs in both native modes, ``native-commit`` adds a
+# test-only worker plugin that redeclares every workflow a worker registers as commit mode,
+# rather than every test workflow having a definition for each mode. The plugin replaces the
+# definition on the class, which the worker uses for the append mode; a sandboxed workflow
+# re-imports its module and gets the original definition, which only ``workflow.stream().close()``
+# consults, and the harness does not call it.
+#
 # The tests share one server, so unlike the time-skipping test server it replaces, timers take
 # real time and every test must use unique workflow IDs.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 from temporalio.client import Client, Plugin
+from temporalio.contrib.redis_streams import RedisStreamsPlugin
 from temporalio.converter import DataConverter
+from temporalio.plugin import SimplePlugin
+from temporalio.worker import WorkerConfig
+from temporalio.workflow import _Definition
 
-from temporal_agent_harness.harness.streams import (
-    StreamBackendFactory,
-    native_streams,
-    redis_streams,
-)
 from temporal_agent_harness.plugin import AgentHarnessPlugin
 
 BACKENDS = ("native", "native-commit", "redis")
@@ -32,12 +40,27 @@ backend = "native"
 redis_url = ""
 
 
-def stream_backend_factory() -> StreamBackendFactory:
-    if backend == "native":
-        return native_streams()
+def stream_plugins() -> list[Plugin]:
     if backend == "native-commit":
-        return native_streams(commit_mode=True)
-    return redis_streams(redis_url)
+        return [CommitModePlugin()]
+    if backend == "redis":
+        return [RedisStreamsPlugin(redis_url)]
+    return []
+
+
+class CommitModePlugin(SimplePlugin):
+    """Redeclares every workflow a worker registers as ``stream_commit_mode=True``."""
+
+    def __init__(self) -> None:
+        super().__init__(name="CommitModePlugin")
+
+    def configure_worker(self, config: WorkerConfig) -> WorkerConfig:
+        config = super().configure_worker(config)
+        for cls in config.get("workflows") or ():
+            defn = dataclasses.replace(_Definition.must_from_class(cls), stream_commit_mode=True)
+            setattr(cls, "__temporal_workflow_definition", defn)
+            setattr(defn.run_fn, "__temporal_workflow_definition", defn)
+        return config
 
 
 @dataclass
@@ -61,15 +84,13 @@ async def start_env(
     data_converter: DataConverter = DataConverter.default,
     plugins: Sequence[Plugin] = (),
 ) -> StreamEnv:
-    """A client with an ``AgentHarnessPlugin`` on the chosen backend, unless ``plugins`` has one.
+    """A client on the chosen backend, with an ``AgentHarnessPlugin`` unless ``plugins`` has one.
 
     The added plugin does not offload large payloads, so a test's data converter is used as given.
     """
     if not any(isinstance(p, AgentHarnessPlugin) for p in plugins):
-        plugins = [
-            *plugins,
-            AgentHarnessPlugin(large_payload_offload=None, stream_backend=stream_backend_factory()),
-        ]
+        plugins = [*plugins, AgentHarnessPlugin(large_payload_offload=None)]
+    plugins = [*plugins, *stream_plugins()]
     client = await Client.connect(
         TEMPORAL_ADDRESS, namespace="default", data_converter=data_converter, plugins=plugins
     )

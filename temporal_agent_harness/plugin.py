@@ -57,6 +57,7 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from temporalio.client import ClientConfig
 from temporalio.contrib.pydantic import PydanticPayloadConverter
 from temporalio.converter import DataConverter, DefaultPayloadConverter, ExternalStorage
 from temporalio.plugin import SimplePlugin
@@ -64,7 +65,6 @@ from temporalio.worker import WorkerConfig
 
 from temporal_agent_harness.harness.jev_approvals.activity import JEV_APPROVAL_ACTIVITIES
 from temporal_agent_harness.harness import streams
-from temporal_agent_harness.harness.streams import StreamBackendFactory
 from temporal_agent_harness.utils.large_payload import DEFAULT_PAYLOAD_STORAGE
 
 if TYPE_CHECKING:
@@ -168,8 +168,10 @@ class AgentHarnessPlugin(SimplePlugin):
       ``tools``.
     * **Filesystem activities** — the ``vfs.<name>.*`` activities of each
       :class:`~temporal_agent_harness.harness.code_mode.ActivityFileSystem` in ``filesystems``.
-    * **Stream backend** — the worker's ``stream_backend``, which stores the events agents
-      append, unless the worker sets its own.
+    * **Stream backend** — when ``TEMPORAL_AGENT_STREAM_BACKEND=redis``, a Redis backend for
+      the client and its workers, unless another plugin set one (see
+      :func:`~temporal_agent_harness.harness.streams.redis_plugin_from_env`). Otherwise the
+      events agents append are stored as another plugin chooses, or natively.
 
     Args:
         tools: The agent's tools. The activity-backed ones get their durable bodies
@@ -187,11 +189,6 @@ class AgentHarnessPlugin(SimplePlugin):
             vars your deployment uses in your own startup code. Every client, worker, and
             server must end up with the same backend, or a payload offloaded by one is
             unreadable by another. ``None`` disables offloading entirely.
-        stream_backend: Where agents' event streams are stored:
-            :func:`~temporal_agent_harness.harness.streams.native_streams` or
-            :func:`~temporal_agent_harness.harness.streams.redis_streams`. Defaults to
-            :func:`~temporal_agent_harness.harness.streams.stream_backend_from_env`. Every
-            client and worker of a deployment must use the same one.
     """
 
     def __init__(
@@ -202,7 +199,6 @@ class AgentHarnessPlugin(SimplePlugin):
         # Defaulting to the shared local storage rather than to ``None`` keeps ``None`` free
         # to mean the one other thing a caller might want: no offloading at all.
         large_payload_offload: ExternalStorage | None = DEFAULT_PAYLOAD_STORAGE,
-        stream_backend: StreamBackendFactory | None = None,
     ) -> None:
         # Resolved eagerly so a bad `tools` entry surfaces at plugin construction, next to the
         # developer's own call, rather than deep inside Worker() where the traceback points at
@@ -213,7 +209,7 @@ class AgentHarnessPlugin(SimplePlugin):
             *JEV_APPROVAL_ACTIVITIES,
         ]
 
-        self.stream_backend_factory: StreamBackendFactory = stream_backend or streams.stream_backend_from_env()
+        self._redis_streams = streams.redis_plugin_from_env()
 
         def data_converter(converter: DataConverter | None) -> DataConverter:
             return _data_converter(converter, offload=large_payload_offload)
@@ -244,10 +240,13 @@ class AgentHarnessPlugin(SimplePlugin):
             config.get("activities"),
             [SubagentActivities(client).run_subagent_turn],
         )
-        if config.get("stream_backend") is None:
-            config["stream_backend"] = streams.bind_stream_backend(
-                client, self.stream_backend_factory
-            )
+        return config
+
+    def configure_client(self, config: ClientConfig) -> ClientConfig:
+        """See base class. Also sets the Redis stream backend that the environment chooses."""
+        config = super().configure_client(config)
+        if self._redis_streams and config.get("stream_backend") is None:
+            config = self._redis_streams.configure_client(config)
         return config
 
     def _append_activities(

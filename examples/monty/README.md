@@ -109,11 +109,13 @@ every process (session manager, server, worker):
 
 | Value | Storage |
 |-|-|
-| `native` (default) | the Temporal server; the worker appends a workflow's records after each activation |
-| `native-commit` | the Temporal server; the records travel in the workflow task completion |
+| `native` (default) | the Temporal server |
 | `redis` | Redis at `TEMPORAL_AGENT_STREAM_REDIS_URL` |
 
-`native` does not work with these agents. They receive every message as an Update. An Update
-sent to an idle workflow runs in a speculative workflow task, and the native backend rejects
-appends from speculative workflow tasks, so the task fails and the Update is aborted. Use
-`native-commit` or `redis`.
+With `native`, these agents work only if their workflow classes declare commit mode,
+`@workflow.defn(stream_commit_mode=True)`, so that a workflow task's records travel in its
+completion. They receive every message as an Update. An Update sent to an idle workflow runs in a
+speculative workflow task, and without commit mode the native backend rejects appends from
+speculative workflow tasks, so the task fails and the Update is aborted. The examples do not
+declare commit mode, because a worker with a Redis backend refuses to register a workflow that
+does: add the declaration to use `native`, or use `redis`.

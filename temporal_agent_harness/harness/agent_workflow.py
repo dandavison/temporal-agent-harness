@@ -42,7 +42,6 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from temporalio import activity, workflow
 from temporalio.common import VersioningBehavior
 from temporalio.exceptions import ApplicationError
-from temporalio.streams import workflow_append
 from temporalio.workflow import ActivityConfig
 
 from temporal_agent_harness.harness.state import StateRef
@@ -3497,7 +3496,7 @@ class AgentWorkflowRunner:
         and an explicit id only where there is no ambient one to read: the admission prologue,
         which publishes ``message_accepted`` for a message that has not started running yet.
         """
-        workflow_append(
+        workflow.stream().publish(
             AgentEvent(
                 event=event,
                 # This agent's own short id — so every event on the stream self-identifies its
