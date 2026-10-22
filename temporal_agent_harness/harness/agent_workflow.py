@@ -2045,8 +2045,10 @@ class AgentWorkflowRunner:
                 "a handler) if that is not what you intended."
             )
         self._closed = False
-        # Tasks of publishes that have not finished; see ``_publish_event``.
-        self._publishing: set[asyncio.Task[None]] = set()
+        # Events published but not yet passed to the stream, and the task that passes them on, in
+        # order; see ``_publish_event``.
+        self._unpublished: list[AgentEvent] = []
+        self._publishing: asyncio.Task[None] | None = None
         # Observable state declared on the agent class with ``agent.state(...)``, keyed by
         # state id; registered at the end of construction, once publishing works.
         self._states: dict[str, StateRef[Any]] = {}
@@ -3522,21 +3524,24 @@ class AgentWorkflowRunner:
         """Publish ``event`` to the agent's stream without waiting for the store.
 
         Workflow publishes are awaited, but events are published from synchronous code
-        throughout the runner, so each publish runs as a task of its own. Tasks start in the
-        order they are created, so events reach the stream in publish order, and the worker
-        stores them before the activation's completion, also when the run ends. A store failure
-        fails the workflow task, whichever task awaited the publish.
+        throughout the runner. So events join a queue, which one task drains in order, awaiting
+        each publish before the next: events reach the stream in publish order whatever the
+        scheduling of other tasks. The worker stores them before the activation's completion,
+        also when the run ends. A store failure fails the workflow task.
         """
+        self._unpublished.append(event)
+        if self._publishing is None or self._publishing.done():
+            self._publishing = asyncio.get_running_loop().create_task(self._drain_events())
+
+    async def _drain_events(self) -> None:
         stream = workflow.get_stream_handle(
             workflow_id=workflow.info().workflow_id,
             first_execution_run_id=workflow.info().first_execution_run_id,
             name=EVENTS_STREAM,
         )
-        task = asyncio.get_running_loop().create_task(
-            stream.publish(event, topic=TURN_EVENTS_TOPIC)
-        )
-        self._publishing.add(task)
-        task.add_done_callback(self._publishing.discard)
+        while self._unpublished:
+            events, self._unpublished = self._unpublished, []
+            await stream.publish(*events, topic=TURN_EVENTS_TOPIC)
 
 
 # ---------------------------------------------------------------------------
