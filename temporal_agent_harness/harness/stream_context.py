@@ -38,3 +38,7 @@ class TurnStreamContext(BaseModel):
         "derive it from ``activity.info()`` (which only knows the workflow_id), and the agent's id "
         "is no longer its workflow_id but a short, parent-assignable handle."
     )
+    stream_first_run_id: str = Field(
+        description="The first run ID of the agent workflow's run chain, which with the "
+        "activity's workflow ID names the workflow's stream that the activity writes to."
+    )

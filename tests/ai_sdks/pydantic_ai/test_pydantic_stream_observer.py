@@ -130,7 +130,7 @@ async def _drive(
 
 @pytest.mark.asyncio
 async def test_full_turn_translates_to_harness_vocabulary(fake_publisher: _FakePublisher):
-    ctx = TurnStreamContext(turn_id="t-1", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-1", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     events = [
         _text_start(0, "Hel"),
         _text_delta(0, "lo"),
@@ -189,7 +189,7 @@ async def test_full_turn_translates_to_harness_vocabulary(fake_publisher: _FakeP
 async def test_tool_requested_flushed_on_close_without_part_end(fake_publisher: _FakePublisher):
     # Defensive path: a tool-call part that opened (and streamed args) but whose PartEnd never
     # arrived is still flushed as one tool_requested when the observer closes.
-    ctx = TurnStreamContext(turn_id="t-2", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-2", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     events = [
         _tool_start(0, "call_BUF", "search"),
         _tool_args_delta(0, "call_BUF", '{"n": 42}'),
@@ -206,7 +206,7 @@ async def test_tool_requested_flushed_on_close_without_part_end(fake_publisher: 
 async def test_started_emitted_at_dispatch_before_any_event(fake_publisher: _FakePublisher):
     # The started bracket must be published at __aenter__ — before any event is fed — so the
     # started→ended span measures true model-call latency (time-to-first-token included).
-    ctx = TurnStreamContext(turn_id="t-4", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-4", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     async with h.PydanticAIStreamObserver(ctx, model="openai:gpt-5.1") as obs:
         assert len(fake_publisher.events) == 1
         started = fake_publisher.events[0]
@@ -218,7 +218,7 @@ async def test_started_emitted_at_dispatch_before_any_event(fake_publisher: _Fak
 
 @pytest.mark.asyncio
 async def test_bracket_closes_even_with_no_content(fake_publisher: _FakePublisher):
-    ctx = TurnStreamContext(turn_id="t-3", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-3", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     # model=None here to exercise the degraded path (requested model unknown), no usage recorded.
     await _drive([], ctx, model=None)
     kinds = [e.type for e in fake_publisher.events]
@@ -327,7 +327,7 @@ def test_harness_deps_snapshots_stream_context_from_runner():
     # Ergonomics: pass just the runner; HarnessDeps captures the in-flight turn's stream context
     # from it (resolved workflow-side, since the model-activity handler that consumes it can't reach
     # the runner). The runner stays a live attribute but is excluded from serialization.
-    ctx = TurnStreamContext(turn_id="t-9", turn_number=3, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-9", turn_number=3, agent_id="agent-abc", stream_first_run_id="run-1")
     runner = _FakeRunner(stream_context=ctx)
 
     deps = h.HarnessDeps(runner=runner)
@@ -338,5 +338,5 @@ def test_harness_deps_snapshots_stream_context_from_runner():
     assert deps.model_dump()["harness_stream_context"]["turn_id"] == "t-9"
 
     # An explicit context overrides the snapshot rather than being clobbered.
-    other = TurnStreamContext(turn_id="t-override", turn_number=1, agent_id="agent-abc")
+    other = TurnStreamContext(turn_id="t-override", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     assert h.HarnessDeps(runner=runner, harness_stream_context=other).harness_stream_context == other

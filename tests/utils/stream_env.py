@@ -9,8 +9,9 @@
 # test-only worker plugin that redeclares every workflow a worker registers as commit mode,
 # rather than every test workflow having a definition for each mode. The plugin replaces the
 # definition on the class, which the worker uses for the append mode; a sandboxed workflow
-# re-imports its module and gets the original definition, which only ``workflow.stream().close()``
-# consults, and the harness does not call it.
+# re-imports its module and gets the original definition, which only a workflow stream's
+# ``close()`` and its publishes' choice of whether to wait for the store consult. The harness does
+# not close its stream, and waiting on the store is correct in either mode.
 #
 # The tests share one server, so unlike the time-skipping test server it replaces, timers take
 # real time and every test must use unique workflow IDs.

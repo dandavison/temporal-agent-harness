@@ -429,7 +429,10 @@ def _consume(items: list[_FakeItem], monkeypatch):
         handle="aaaaaa-bbbbbb",
         agent_key="sample",
         parent_stream_context=TurnStreamContext(
-            turn_id="parent-turn-1", turn_number=1, agent_id="aaaaaa"
+            turn_id="parent-turn-1",
+            turn_number=1,
+            agent_id="aaaaaa",
+            stream_first_run_id="run-1",
         ),
     )
     progress = _TurnProgress(

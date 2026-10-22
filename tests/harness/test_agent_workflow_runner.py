@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import uuid
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -107,7 +108,7 @@ async def _run_evaluator(runner, tool_name: str, **kwargs):
     return await runner._run_auto_mode_evaluator(
         _ctx(tool_name, **kwargs),
         tool_id=f"call-{tool_name}",
-        stream=TurnStreamContext(turn_id="turn-1", turn_number=1, agent_id="a1b2c3"),
+        stream=TurnStreamContext(turn_id="turn-1", turn_number=1, agent_id="a1b2c3", stream_first_run_id="run-1"),
     )
 
 # ---------------------------------------------------------------------------
@@ -1484,7 +1485,7 @@ def test_errored_subagent_turn_closes_bracket_on_actual_accepted_turn(offline_bu
 
     import temporal_agent_harness.harness.agent_workflow as aw
 
-    published = [c.args[0] for c in aw.workflow.stream().publish.call_args_list]
+    published = [c.args[0] for c in aw.AgentWorkflowRunner._publish_event.call_args_list]
     replies = [e for e in published if isinstance(e.event, SubagentReplyReceived)]
     assert len(replies) == 1
     rr = replies[0].event
@@ -1520,7 +1521,10 @@ def offline_build(monkeypatch):
     # no workflow loop, so stub it with a plain uuid.
     monkeypatch.setattr(aw.workflow, "uuid4", lambda: uuid.uuid4())
 
-    monkeypatch.setattr(aw.workflow, "stream", MagicMock())
+    monkeypatch.setattr(aw.AgentWorkflowRunner, "_publish_event", MagicMock())
+    monkeypatch.setattr(
+        aw.workflow, "info", lambda: SimpleNamespace(first_execution_run_id="run-1")
+    )
 
     def build(config: AgentConfig):
         return AgentWorkflowRunner(
@@ -1541,7 +1545,10 @@ def offline_build_policy(monkeypatch):
     # The runner generates its short agent_id from workflow.uuid4() in __init__; offline there is
     # no workflow loop, so stub it with a plain uuid.
     monkeypatch.setattr(aw.workflow, "uuid4", lambda: uuid.uuid4())
-    monkeypatch.setattr(aw.workflow, "stream", MagicMock())
+    monkeypatch.setattr(aw.AgentWorkflowRunner, "_publish_event", MagicMock())
+    monkeypatch.setattr(
+        aw.workflow, "info", lambda: SimpleNamespace(first_execution_run_id="run-1")
+    )
 
     def build(
         config: AgentConfig,

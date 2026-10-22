@@ -148,7 +148,7 @@ async def _drive(
 
 @pytest.mark.asyncio
 async def test_full_turn_translates_to_harness_vocabulary(fake_publisher: _FakePublisher):
-    ctx = TurnStreamContext(turn_id="t-1", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-1", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     events = [
         _text_delta("Hel"),
         _text_delta("lo"),
@@ -208,7 +208,7 @@ async def test_full_turn_translates_to_harness_vocabulary(fake_publisher: _FakeP
 async def test_tool_requested_falls_back_to_buffer_when_done_args_empty(
     fake_publisher: _FakePublisher,
 ):
-    ctx = TurnStreamContext(turn_id="t-2", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-2", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     events = [
         _fn_call_added("fc_item_9", "call_BUF", "search"),
         _args_delta("fc_item_9", '{"n": '),
@@ -230,7 +230,7 @@ async def test_started_emitted_at_dispatch_before_any_event(fake_publisher: _Fak
     # the started→ended span measures the true model-call latency (time-to-first-token
     # included), not just the tail after the first chunk arrives. Prove it by opening the
     # observer and checking started is already published before on_event is ever called.
-    ctx = TurnStreamContext(turn_id="t-4", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-4", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     async with h.OpenAIStreamObserver(ctx, model="gpt-5.1") as obs:
         assert len(fake_publisher.events) == 1
         started = fake_publisher.events[0]
@@ -243,7 +243,7 @@ async def test_started_emitted_at_dispatch_before_any_event(fake_publisher: _Fak
 
 @pytest.mark.asyncio
 async def test_bracket_closes_even_with_no_content(fake_publisher: _FakePublisher):
-    ctx = TurnStreamContext(turn_id="t-3", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-3", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     # model=None here to exercise the degraded path (requested model unknown).
     await _drive([], ctx, model=None)
     kinds = [e.type for e in fake_publisher.events]
@@ -269,7 +269,7 @@ async def test_factory_threads_batch_interval_to_the_publisher(
     # select_observer; it must reach the turn publisher, or configuring the field would
     # silently do nothing on the harness path (each flush is one Signal, so this is the
     # knob that trades UI snappiness for workflow-history volume).
-    ctx = TurnStreamContext(turn_id="t-5", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-5", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     token = h._HarnessStreamToken(context=ctx, model="gpt-5.1")
 
     observer = h.harness_observer_factory(
@@ -287,7 +287,7 @@ async def test_factory_without_interval_defers_to_the_harness_default(
 ):
     # Called by hand (no cadence): pass None through, so publisher_from_activity applies
     # DEFAULT_PUBLISH_BATCH_INTERVAL rather than the observer duplicating that value.
-    ctx = TurnStreamContext(turn_id="t-6", turn_number=1, agent_id="agent-abc")
+    ctx = TurnStreamContext(turn_id="t-6", turn_number=1, agent_id="agent-abc", stream_first_run_id="run-1")
     token = h._HarnessStreamToken(context=ctx, model="gpt-5.1")
 
     async with h.harness_observer_factory(token):

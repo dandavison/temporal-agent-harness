@@ -47,6 +47,7 @@ from temporalio.workflow import ActivityConfig
 from temporal_agent_harness.harness.state import StateRef
 from temporal_agent_harness.harness.streams import (
     BEGINNING,
+    EVENTS_STREAM,
     ActivityStreamPublisher,
     activity_publisher,
 )
@@ -1580,6 +1581,7 @@ class _WorkflowStatus:
             turn_id=self._current_turn_id,
             turn_number=self._current_turn,
             agent_id=self._agent_id,
+            stream_first_run_id=workflow.info().first_execution_run_id,
         )
 
     @property
@@ -2043,6 +2045,8 @@ class AgentWorkflowRunner:
                 "a handler) if that is not what you intended."
             )
         self._closed = False
+        # Tasks of publishes that have not finished; see ``_publish_event``.
+        self._publishing: set[asyncio.Task[None]] = set()
         # Observable state declared on the agent class with ``agent.state(...)``, keyed by
         # state id; registered at the end of construction, once publishing works.
         self._states: dict[str, StateRef[Any]] = {}
@@ -2982,6 +2986,7 @@ class AgentWorkflowRunner:
         On close, the loop waits for in-flight participants to finish before returning, so a
         joined handler's work is never silently discarded.
         """
+        await workflow.create_stream(EVENTS_STREAM)
         while not self._closed:
             await workflow.wait_condition(
                 lambda: self._status.can_open_turn or bool(self._joining) or self._closed
@@ -3411,7 +3416,8 @@ class AgentWorkflowRunner:
         # with is not derivable from ``activity.info()`` (which only knows the workflow_id), so it
         # rides in on the threaded ``context`` (TurnStreamContext.agent_id).
         async with activity_publisher(
-            DEFAULT_PUBLISH_BATCH_INTERVAL if batch_interval is None else batch_interval
+            context,
+            DEFAULT_PUBLISH_BATCH_INTERVAL if batch_interval is None else batch_interval,
         ) as publisher:
             yield TurnEventPublisher(publisher=publisher, context=context)
 
@@ -3496,7 +3502,7 @@ class AgentWorkflowRunner:
         and an explicit id only where there is no ambient one to read: the admission prologue,
         which publishes ``message_accepted`` for a message that has not started running yet.
         """
-        workflow.stream().publish(
+        self._publish_event(
             AgentEvent(
                 event=event,
                 # This agent's own short id — so every event on the stream self-identifies its
@@ -3509,9 +3515,28 @@ class AgentWorkflowRunner:
                     _CURRENT_MESSAGE_ID.get() if isinstance(message_id, _Ambient) else message_id
                 ),
                 timestamp=workflow.time(),
-            ),
-            topic=TURN_EVENTS_TOPIC,
+            )
         )
+
+    def _publish_event(self, event: AgentEvent) -> None:
+        """Publish ``event`` to the agent's stream without waiting for the store.
+
+        Workflow publishes are awaited, but events are published from synchronous code
+        throughout the runner, so each publish runs as a task of its own. Tasks start in the
+        order they are created, so events reach the stream in publish order, and the worker
+        stores them before the activation's completion, also when the run ends. A store failure
+        fails the workflow task, whichever task awaited the publish.
+        """
+        stream = workflow.get_stream_handle(
+            workflow_id=workflow.info().workflow_id,
+            first_execution_run_id=workflow.info().first_execution_run_id,
+            name=EVENTS_STREAM,
+        )
+        task = asyncio.get_running_loop().create_task(
+            stream.publish(event, topic=TURN_EVENTS_TOPIC)
+        )
+        self._publishing.add(task)
+        task.add_done_callback(self._publishing.discard)
 
 
 # ---------------------------------------------------------------------------

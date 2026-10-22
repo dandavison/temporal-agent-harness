@@ -245,7 +245,7 @@ class AgentHarnessPlugin(SimplePlugin):
     def configure_client(self, config: ClientConfig) -> ClientConfig:
         """See base class. Also sets the Redis stream backend that the environment chooses."""
         config = super().configure_client(config)
-        if self._redis_streams and config.get("stream_backend") is None:
+        if self._redis_streams and config.get("stream_backends") is None:
             config = self._redis_streams.configure_client(config)
         return config
 
