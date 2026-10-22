@@ -1971,3 +1971,53 @@ async def test_resend_under_the_same_update_id_is_one_message(client_and_queue):
     assert await _wait_for_seen(handle, 2) == ["greet:Ada", "greet:Ada"]
     status = await handle.query(AGENT_STATUS_QUERY, result_type=AgentStatus)
     assert status.current_turn == 2 and status.pending_turns == []
+
+
+class _OrderRecordingStream:
+    """A stream handle whose publishes take a different number of event-loop turns each, longest
+    first, and that records how many are in flight at once and the order they were made in."""
+
+    def __init__(self) -> None:
+        self.published: list[Any] = []
+        self.in_flight = 0
+        self.most_in_flight = 0
+        self.turns = 5
+
+    async def publish(self, *values: Any, topic: str = "") -> None:
+        self.in_flight += 1
+        self.most_in_flight = max(self.most_in_flight, self.in_flight)
+        turns, self.turns = self.turns, max(0, self.turns - 1)
+        for _ in range(turns):
+            await asyncio.sleep(0)
+        self.published.extend(values)
+        self.in_flight -= 1
+
+
+async def test_events_are_published_one_at_a_time_in_publish_order(monkeypatch):
+    """The runner publishes events from synchronous code, so it cannot await each publish. They
+    must still reach the stream in the order they were published, whatever each publish's own
+    timing: one publish at a time, each after the previous one has finished."""
+    import temporal_agent_harness.harness.agent_workflow as aw
+
+    for handler in ("set_update_handler", "set_query_handler", "set_signal_handler"):
+        monkeypatch.setattr(aw.workflow, handler, lambda *a, **k: None)
+    monkeypatch.setattr(aw.workflow, "time", lambda: 0.0)
+    monkeypatch.setattr(aw.workflow, "uuid4", lambda: uuid.uuid4())
+    monkeypatch.setattr(
+        aw.workflow,
+        "info",
+        lambda: SimpleNamespace(workflow_id="wf-1", first_execution_run_id="run-1"),
+    )
+    stream = _OrderRecordingStream()
+    monkeypatch.setattr(aw.workflow, "get_stream_handle", lambda **_: stream)
+    runner = AgentWorkflowRunner(
+        AgentConfig(), approval_policy_default=ToolApprovalPolicy.dangerously_skip_all()
+    )
+    before = len(stream.published)
+    events = [MagicMock(name=f"event-{i}") for i in range(5)]
+    for event in events:
+        runner._publish_event(event)
+    for _ in range(100):
+        await asyncio.sleep(0)
+    assert stream.published[before:] == events
+    assert stream.most_in_flight == 1
