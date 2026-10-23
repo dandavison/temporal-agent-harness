@@ -7,9 +7,9 @@
 # client's default backend when ``TEMPORAL_AGENT_STREAM_BACKEND=redis``, so the example stack's
 # clients and workers agree.
 #
-# DESIGN — the stream: each agent workflow owns one stream, named ``EVENTS_STREAM``, which its run
-# creates. An activity writes to its workflow's stream through the handle that the workflow
-# threads to it in ``TurnStreamContext``.
+# DESIGN — the stream: each agent workflow owns one stream, defined by ``AgentEventStream``, which
+# its run creates. An activity writes to its workflow's stream through the handle that the
+# workflow threads to it in ``TurnStreamContext``.
 #
 # DESIGN — cursors: a position is the stream's opaque cursor, base64-encoded so it travels in
 # Pydantic models, JSON and URLs. ``BEGINNING`` ("") reads from the start. A cursor is a resume
@@ -27,19 +27,23 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Generic, TypeVar
 
-from temporalio import activity
+from temporalio import activity, streams
 from temporalio.client import Client
 from temporalio.contrib.redis_streams import RedisStreamBackend
 from temporalio.streams import ActivityStreamHandle, StreamBackends, StreamCursor, StreamRecord
 
+from temporal_agent_harness.harness.agent_protocol.events import TURN_EVENTS_TOPIC, AgentEvent
 from temporal_agent_harness.harness.stream_context import TurnStreamContext
 
 T = TypeVar("T")
 
 BEGINNING = ""
 
-EVENTS_STREAM = "events"
-"""The name of the stream an agent workflow owns."""
+
+class AgentEventStream(streams.Stream, name="events"):
+    """The stream an agent workflow owns."""
+
+    turn_events = streams.Topic[AgentEvent](name=TURN_EVENTS_TOPIC)
 
 
 def redis_backends_from_env() -> StreamBackends | None:
@@ -81,7 +85,7 @@ class StreamItem(Generic[T]):
 
 async def head(client: Client, workflow_id: str, *, topic: str) -> str:
     """The cursor of the last record of ``topic``, or ``BEGINNING`` if it has none."""
-    stream = client.get_stream_handle(workflow_id=workflow_id, name=EVENTS_STREAM)
+    stream = client.get_stream_handle(AgentEventStream, workflow_id=workflow_id)
     last = await stream.fetch_last_records(1, topics=[topic])
     return encode_cursor(last[-1].cursor) if last else BEGINNING
 
@@ -100,7 +104,7 @@ async def subscribe(
     Withdrawal notices are skipped, so a consumer keeps a record that is withdrawn after it was
     yielded. ``mark`` is a cursor from :func:`head`: each item says whether it is at or after it.
     """
-    stream = client.get_stream_handle(workflow_id=workflow_id, name=EVENTS_STREAM)
+    stream = client.get_stream_handle(AgentEventStream, workflow_id=workflow_id).handle
     reached = mark is None or mark in (BEGINNING, after)
     async for record in stream.fetch_records(
         after=decode_cursor(after),
@@ -188,7 +192,7 @@ async def activity_publisher(
         stream = activity.get_stream_handle(
             workflow_id=info.workflow_id,
             first_execution_run_id=context.stream_first_run_id,
-            name=EVENTS_STREAM,
+            name=AgentEventStream.stream_name,
         )
         publisher = _publishers[info.task_token] = ActivityStreamPublisher(
             stream, batch_interval
@@ -203,8 +207,8 @@ async def activity_publisher(
 
 __all__ = [
     "BEGINNING",
-    "EVENTS_STREAM",
     "ActivityStreamPublisher",
+    "AgentEventStream",
     "StreamItem",
     "activity_publisher",
     "head",

@@ -76,7 +76,7 @@ from temporal_agent_harness.harness.agent_workflow import (
     agent_init_data,
 )
 from temporal_agent_harness.harness.stream_context import TurnStreamContext
-from temporal_agent_harness.harness.streams import subscribe
+from temporal_agent_harness.harness.streams import AgentEventStream, subscribe
 from tests.utils.stream_env import start_env
 
 
@@ -2009,7 +2009,9 @@ async def test_events_are_published_one_at_a_time_in_publish_order(monkeypatch):
         lambda: SimpleNamespace(workflow_id="wf-1", first_execution_run_id="run-1"),
     )
     stream = _OrderRecordingStream()
-    monkeypatch.setattr(aw.workflow, "get_stream_handle", lambda **_: stream)
+    monkeypatch.setattr(
+        aw.workflow, "get_stream_handle", lambda *_, **__: AgentEventStream(stream)
+    )
     runner = AgentWorkflowRunner(
         AgentConfig(), approval_policy_default=ToolApprovalPolicy.dangerously_skip_all()
     )

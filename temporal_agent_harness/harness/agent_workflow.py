@@ -47,8 +47,8 @@ from temporalio.workflow import ActivityConfig
 from temporal_agent_harness.harness.state import StateRef
 from temporal_agent_harness.harness.streams import (
     BEGINNING,
-    EVENTS_STREAM,
     ActivityStreamPublisher,
+    AgentEventStream,
     activity_publisher,
 )
 from temporal_agent_harness.harness.state.decl import declared_states, state_ref
@@ -2988,7 +2988,7 @@ class AgentWorkflowRunner:
         On close, the loop waits for in-flight participants to finish before returning, so a
         joined handler's work is never silently discarded.
         """
-        await workflow.create_stream(EVENTS_STREAM)
+        await workflow.create_stream(AgentEventStream)
         while not self._closed:
             await workflow.wait_condition(
                 lambda: self._status.can_open_turn or bool(self._joining) or self._closed
@@ -3535,13 +3535,13 @@ class AgentWorkflowRunner:
 
     async def _drain_events(self) -> None:
         stream = workflow.get_stream_handle(
+            AgentEventStream,
             workflow_id=workflow.info().workflow_id,
             first_execution_run_id=workflow.info().first_execution_run_id,
-            name=EVENTS_STREAM,
         )
         while self._unpublished:
             events, self._unpublished = self._unpublished, []
-            await stream.publish(*events, topic=TURN_EVENTS_TOPIC)
+            await stream.turn_events.publish(*events)
 
 
 # ---------------------------------------------------------------------------
