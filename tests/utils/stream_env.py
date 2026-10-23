@@ -50,7 +50,7 @@ def stream_plugins() -> list[Plugin]:
 
 def stream_backends() -> StreamBackends | None:
     if backend == "redis":
-        return StreamBackends([RedisStreamBackend(redis_url)])
+        return StreamBackends([RedisStreamBackend(redis_url)], default="redis")
     return None
 
 

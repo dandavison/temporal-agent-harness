@@ -50,7 +50,9 @@ def redis_backends_from_env() -> StreamBackends | None:
     if name == "native":
         return None
     if name == "redis":
-        return StreamBackends([RedisStreamBackend(os.environ["TEMPORAL_AGENT_STREAM_REDIS_URL"])])
+        return StreamBackends(
+            [RedisStreamBackend(os.environ["TEMPORAL_AGENT_STREAM_REDIS_URL"])], default="redis"
+        )
     raise ValueError(f"unknown TEMPORAL_AGENT_STREAM_BACKEND {name!r}")
 
 
