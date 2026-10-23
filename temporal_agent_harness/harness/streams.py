@@ -29,8 +29,8 @@ from typing import Any, Generic, TypeVar
 
 from temporalio import activity
 from temporalio.client import Client
-from temporalio.contrib.redis_streams import RedisStreamsPlugin
-from temporalio.streams import ActivityStreamHandle, StreamCursor, StreamRecord
+from temporalio.contrib.redis_streams import RedisStreamBackend
+from temporalio.streams import ActivityStreamHandle, StreamBackends, StreamCursor, StreamRecord
 
 from temporal_agent_harness.harness.stream_context import TurnStreamContext
 
@@ -42,14 +42,15 @@ EVENTS_STREAM = "events"
 """The name of the stream an agent workflow owns."""
 
 
-def redis_plugin_from_env() -> RedisStreamsPlugin | None:
-    """A Redis plugin at ``TEMPORAL_AGENT_STREAM_REDIS_URL`` if ``TEMPORAL_AGENT_STREAM_BACKEND``
-    is ``redis``, and ``None`` if it is ``native`` (the default)."""
+def redis_backends_from_env() -> StreamBackends | None:
+    """Stream backends with Redis at ``TEMPORAL_AGENT_STREAM_REDIS_URL`` if
+    ``TEMPORAL_AGENT_STREAM_BACKEND`` is ``redis``, and ``None`` if it is ``native`` (the
+    default)."""
     name = os.environ.get("TEMPORAL_AGENT_STREAM_BACKEND", "native")
     if name == "native":
         return None
     if name == "redis":
-        return RedisStreamsPlugin(os.environ["TEMPORAL_AGENT_STREAM_REDIS_URL"])
+        return StreamBackends([RedisStreamBackend(os.environ["TEMPORAL_AGENT_STREAM_REDIS_URL"])])
     raise ValueError(f"unknown TEMPORAL_AGENT_STREAM_BACKEND {name!r}")
 
 
@@ -205,6 +206,6 @@ __all__ = [
     "StreamItem",
     "activity_publisher",
     "head",
-    "redis_plugin_from_env",
+    "redis_backends_from_env",
     "subscribe",
 ]

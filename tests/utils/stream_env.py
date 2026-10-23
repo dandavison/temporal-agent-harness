@@ -24,9 +24,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from temporalio.client import Client, Plugin
-from temporalio.contrib.redis_streams import RedisStreamsPlugin
+from temporalio.contrib.redis_streams import RedisStreamBackend
 from temporalio.converter import DataConverter
 from temporalio.plugin import SimplePlugin
+from temporalio.streams import StreamBackends
 from temporalio.worker import WorkerConfig
 from temporalio.workflow import _Definition
 
@@ -44,9 +45,13 @@ redis_url = ""
 def stream_plugins() -> list[Plugin]:
     if backend == "native-commit":
         return [CommitModePlugin()]
-    if backend == "redis":
-        return [RedisStreamsPlugin(redis_url)]
     return []
+
+
+def stream_backends() -> StreamBackends | None:
+    if backend == "redis":
+        return StreamBackends([RedisStreamBackend(redis_url)])
+    return None
 
 
 class CommitModePlugin(SimplePlugin):
@@ -93,6 +98,10 @@ async def start_env(
         plugins = [*plugins, AgentHarnessPlugin(large_payload_offload=None)]
     plugins = [*plugins, *stream_plugins()]
     client = await Client.connect(
-        TEMPORAL_ADDRESS, namespace="default", data_converter=data_converter, plugins=plugins
+        TEMPORAL_ADDRESS,
+        namespace="default",
+        data_converter=data_converter,
+        plugins=plugins,
+        stream_backends=stream_backends(),
     )
     return StreamEnv(client)

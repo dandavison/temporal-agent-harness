@@ -170,7 +170,7 @@ class AgentHarnessPlugin(SimplePlugin):
       :class:`~temporal_agent_harness.harness.code_mode.ActivityFileSystem` in ``filesystems``.
     * **Stream backend** — when ``TEMPORAL_AGENT_STREAM_BACKEND=redis``, a Redis backend for
       the client and its workers, unless another plugin set one (see
-      :func:`~temporal_agent_harness.harness.streams.redis_plugin_from_env`). Otherwise the
+      :func:`~temporal_agent_harness.harness.streams.redis_backends_from_env`). Otherwise the
       events agents append are stored as another plugin chooses, or natively.
 
     Args:
@@ -209,8 +209,6 @@ class AgentHarnessPlugin(SimplePlugin):
             *JEV_APPROVAL_ACTIVITIES,
         ]
 
-        self._redis_streams = streams.redis_plugin_from_env()
-
         def data_converter(converter: DataConverter | None) -> DataConverter:
             return _data_converter(converter, offload=large_payload_offload)
 
@@ -245,8 +243,8 @@ class AgentHarnessPlugin(SimplePlugin):
     def configure_client(self, config: ClientConfig) -> ClientConfig:
         """See base class. Also sets the Redis stream backend that the environment chooses."""
         config = super().configure_client(config)
-        if self._redis_streams and config.get("stream_backends") is None:
-            config = self._redis_streams.configure_client(config)
+        if config.get("stream_backends") is None:
+            config["stream_backends"] = streams.redis_backends_from_env()
         return config
 
     def _append_activities(
